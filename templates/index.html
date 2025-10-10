@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARISE - Area Information for Safe Environments | Negros Oriental</title>
+    <link rel="icon" type="image/png" href="/static/images/arise-logo.png">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Compact Header -->
+        <header class="compact-header">
+            <div class="header-left">
+                <div class="logo">
+                    <img src="/static/images/arise-logo.png" alt="ARISE Logo" class="logo-image">
+                    <div class="logo-text-container">
+                        <span class="logo-title">ARISE</span>
+                        <span class="logo-subtitle">Area Information for Safe Environments</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="upload-btn" class="upload-button">
+                    <img src="/static/images/icon-upload.png" alt="Upload" class="button-icon">
+                    <span>Upload Data</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Floating Search Bar (Left Side) -->
+            <div class="floating-search">
+                <input type="text" id="location-search" placeholder="Search location in Negros Oriental...">
+                <button id="search-btn" title="Search">
+                    <img src="/static/images/icon-search.png" alt="Search" class="button-icon-small">
+                </button>
+            </div>
+
+            <!-- Right Side Controls -->
+            <div class="right-controls">
+                <button id="zoom-in-btn" class="control-btn" title="Zoom in">
+                    <span class="icon">+</span>
+                </button>
+                <button id="zoom-out-btn" class="control-btn" title="Zoom out">
+                    <span class="icon">−</span>
+                </button>
+                <!-- Layer Control Button (moved here) -->
+                <button id="layer-control-btn" class="control-btn" title="Disaster Layers">
+                    <img src="/static/images/icon-layers.png" alt="Layers" class="button-icon-small">
+                </button>
+            </div>
+
+            <!-- Layer Control Panel -->
+            <div id="layer-panel" class="layer-panel hidden">
+                <div class="layer-panel-header">
+                    <h4>Disaster Layers</h4>
+                    <button class="close-panel-btn" id="close-layer-panel">×</button>
+                </div>
+                <div class="layer-panel-content">
+                    <label class="layer-toggle-item">
+                        <input type="checkbox" id="flood-toggle" checked>
+                        <img src="/static/images/icon-flood.png" alt="Flood" class="layer-icon-img">
+                        <span class="layer-name">Flood Risk Map</span>
+                    </label>
+                    <label class="layer-toggle-item">
+                        <input type="checkbox" id="landslide-toggle">
+                        <img src="/static/images/icon-landslide.png" alt="Landslide" class="layer-icon-img">
+                        <span class="layer-name">Landslide Risk Map</span>
+                    </label>
+                    <label class="layer-toggle-item">
+                        <input type="checkbox" id="liquefaction-toggle">
+                        <img src="/static/images/icon-liquefaction.png" alt="Liquefaction" class="layer-icon-img">
+                        <span class="layer-name">Liquefaction Risk Map</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Sidebar Toggle Button -->
+            <button id="sidebar-toggle" class="sidebar-toggle-btn" title="Toggle Information Panel">
+                <span class="toggle-icon">◀</span>
+            </button>
+
+            <!-- Sidebar (Left) -->
+            <div id="sidebar" class="sidebar hidden">
+                <div class="sidebar-header">
+                    <h3>Location Information</h3>
+                    <button id="sidebar-close" class="sidebar-close-btn" title="Close">×</button>
+                </div>
+                
+                <div class="sidebar-content">
+                    <div id="location-info" class="info-card">
+                        <p class="info-prompt">Click on the map to view location details</p>
+                    </div>
+                    
+                    <div id="hazard-info" class="hazard-section">
+                        <h4>Disaster Susceptibility</h4>
+                        <div id="hazard-details"></div>
+                    </div>
+
+                    <div id="facilities-info" class="hazard-section">
+                        <h4>Nearby Facilities (within 3km)</h4>
+                        <div id="facilities-section">
+                            <p class="info-prompt">Click on the map to find nearby facilities</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Map Container -->
+            <div id="map" class="map-container"></div>
+        </div>
+
+        <!-- Upload Modal -->
+        <div id="upload-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Upload Shapefile</h3>
+                    <span class="close-btn" id="close-modal">×</span>
+                </div>
+                
+                <div class="modal-body">
+                    <form id="upload-form" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label for="dataset-type">Dataset Type:</label>
+                            <select id="dataset-type" name="dataset_type" required>
+                                <option value="">Select dataset type...</option>
+                                <option value="flood">Flood Susceptibility</option>
+                                <option value="landslide">Landslide Susceptibility</option>
+                                <option value="liquefaction">Liquefaction Susceptibility</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="shapefile-input">Shapefile (ZIP format):</label>
+                            <input type="file" id="shapefile-input" name="shapefile" accept=".zip" required>
+                            <small>Upload a ZIP file containing .shp, .shx, .dbf, and .prj files</small>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Upload & Process</button>
+                            <button type="button" class="btn btn-secondary" id="cancel-upload">Cancel</button>
+                        </div>
+                    </form>
+                    
+                    <div id="upload-progress" class="hidden">
+                        <div class="progress-bar">
+                            <div class="progress-fill"></div>
+                        </div>
+                        <p>Processing shapefile...</p>
+                    </div>
+                    
+                    <div id="upload-result" class="hidden">
+                        <div id="result-message"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Compact Legend -->
+        <div id="legend" class="compact-legend">
+            <div class="legend-header">
+                <h4>Hazard Levels</h4>
+                <button id="close-legend" class="legend-close-btn" title="Close">×</button>
+            </div>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <span class="legend-color low"></span>
+                    <span class="legend-label">Low</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color moderate"></span>
+                    <span class="legend-label">Moderate</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color high"></span>
+                    <span class="legend-label">High</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color very-high"></span>
+                    <span class="legend-label">Very High</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color debris-flow"></span>
+                    <span class="legend-label"><strong>Debris Flow*</strong></span>
+                </div>
+                <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                    *CRITICAL RISK: Catastrophic rapid movement of rocks, soil, and water during heavy rainfall. Highest landslide hazard level.
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend Toggle Button (when legend is closed) -->
+        <button id="legend-toggle" class="legend-toggle-btn hidden" title="Show Legend">
+            <img src="/static/images/icon-info.png" alt="Info" class="button-icon-small">
+        </button>
+    </div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script src="/static/js/map.js"></script>
+</body>
+</html>
