@@ -8,6 +8,7 @@ class HazardDataset(models.Model):
         ('liquefaction', 'Liquefaction Susceptibility'),
         ('sea_level_rise', 'Sea Level Rise'),
         ('zonal_values', 'Zonal Values'),
+        ('barangay', 'Barangay Boundaries'),  # NEW: Add this line
     ]
     
     name = models.CharField(max_length=200)
@@ -102,3 +103,38 @@ class Facility(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.facility_type})"
+
+class BarangayBoundary(models.Model):
+    """Model for barangay boundary data"""
+    dataset = models.ForeignKey(HazardDataset, on_delete=models.CASCADE)
+    
+    # Basic identifiers
+    brgy_id = models.BigIntegerField()
+    brgycode = models.CharField(max_length=20)
+    b_name = models.CharField(max_length=100)  # Barangay name
+    lgu_name = models.CharField(max_length=100)  # Municipality/City name
+    
+    # Area measurements
+    area_has = models.FloatField(null=True, blank=True)  # Area in hectares
+    area = models.FloatField(null=True, blank=True)
+    perimeter = models.FloatField(null=True, blank=True)
+    hectares = models.FloatField(null=True, blank=True)
+    area_nso = models.FloatField(null=True, blank=True)
+    
+    # Additional data
+    district = models.IntegerField(null=True, blank=True)
+    pop_2020 = models.IntegerField(null=True, blank=True)  # Population 2020
+    nsodata = models.CharField(max_length=100, null=True, blank=True)
+    
+    # Geometry
+    geometry = models.MultiPolygonField(srid=4326)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['brgy_id']),
+            models.Index(fields=['b_name']),
+            models.Index(fields=['lgu_name']),
+        ]
+    
+    def __str__(self):
+        return f"{self.b_name}, {self.lgu_name}"

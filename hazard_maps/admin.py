@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.gis.admin import GISModelAdmin
-from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility
+from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility, BarangayBoundary
 
 @admin.register(HazardDataset)
 class HazardDatasetAdmin(admin.ModelAdmin):
@@ -33,3 +33,9 @@ class FacilityAdmin(GISModelAdmin):
     list_display = ['name', 'facility_type', 'category', 'osm_id']
     list_filter = ['category', 'facility_type']
     search_fields = ['name']
+
+@admin.register(BarangayBoundary)
+class BarangayBoundaryAdmin(GISModelAdmin):
+    list_display = ['b_name', 'lgu_name', 'pop_2020', 'hectares', 'dataset']
+    list_filter = ['lgu_name', 'district', 'dataset']
+    search_fields = ['b_name', 'lgu_name', 'brgycode']

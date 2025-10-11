@@ -65,6 +65,11 @@
                 </div>
                 <div class="layer-panel-content">
                     <label class="layer-toggle-item">
+                        <input type="checkbox" id="barangay-toggle" checked>
+                        <img src="/static/images/icon-boundary.png" alt="Barangay" class="layer-icon-img">
+                        <span class="layer-name">Barangay Boundaries</span>
+                    </label>
+                    <label class="layer-toggle-item">
                         <input type="checkbox" id="flood-toggle" checked>
                         <img src="/static/images/icon-flood.png" alt="Flood" class="layer-icon-img">
                         <span class="layer-name">Flood Risk Map</span>
@@ -134,6 +139,7 @@
                                 <option value="flood">Flood Susceptibility</option>
                                 <option value="landslide">Landslide Susceptibility</option>
                                 <option value="liquefaction">Liquefaction Susceptibility</option>
+                                <option value="barangay">Barangay Boundaries</option>
                             </select>
                         </div>
                         
@@ -191,7 +197,9 @@
                     <span class="legend-label"><strong>Debris Flow*</strong></span>
                 </div>
                 <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
-                    *CRITICAL RISK: Catastrophic rapid movement of rocks, soil, and water during heavy rainfall. Highest landslide hazard level.
+                    * Highest landslide hazard level.<br> 
+                    Rapid movement of rocks, soil, and <br>
+                    water during heavy rainfall.
                 </div>
             </div>
         </div>

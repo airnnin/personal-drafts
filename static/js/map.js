@@ -1,5 +1,5 @@
 let map;
-let floodLayer, landslideLayer, liquefactionLayer;
+let floodLayer, landslideLayer, liquefactionLayer, barangayLayer;
 let currentMarker;
 let facilityMarkers = L.layerGroup();
 
@@ -21,7 +21,8 @@ function initMap() {
         maxZoom: 19
     }).addTo(map);
 
-    // Create layer groups - only flood visible by default
+    // Create layer groups - barangay and flood visible by default
+    barangayLayer = L.layerGroup().addTo(map);  // NEW: Barangay boundaries
     floodLayer = L.layerGroup().addTo(map);
     landslideLayer = L.layerGroup();
     liquefactionLayer = L.layerGroup();
@@ -29,6 +30,7 @@ function initMap() {
 
     // Load all data upfront for instant toggling
     loadHazardData();
+    loadBarangayBoundaries();
     
     map.on('click', function (e) {
         if (!e.originalEvent.defaultPrevented) {
@@ -36,6 +38,63 @@ function initMap() {
         }
     });
 }
+
+// NEW: Load barangay boundaries
+async function loadBarangayBoundaries() {
+    try {
+        const response = await fetch('/api/barangay-data/');
+        if (response.ok) {
+            const barangayData = await response.json();
+            addBarangayLayer(barangayData);
+        }
+    } catch (error) {
+        console.error('Error loading barangay boundaries:', error);
+    }
+}
+
+// NEW: Add barangay boundary layer
+function addBarangayLayer(geojsonData) {
+    L.geoJSON(geojsonData, {
+        style: function(feature) {
+            return {
+                fillColor: 'transparent',
+                weight: 2,
+                opacity: 0.8,
+                color: '#3b82f6',
+                fillOpacity: 0.05,
+                dashArray: '5, 5'
+            };
+        },
+        onEachFeature: function(feature, layer) {
+            // REMOVED: layer.bindPopup() - No more popup clutter!
+            
+            // Hover effect
+            layer.on('mouseover', function() {
+                layer.setStyle({
+                    fillOpacity: 0.2,
+                    weight: 3,
+                    color: '#2563eb'
+                });
+            });
+            
+            layer.on('mouseout', function() {
+                layer.setStyle({
+                    fillOpacity: 0.05,
+                    weight: 2,
+                    color: '#3b82f6'
+                });
+            });
+            
+            // Click handler - still works but no popup
+            layer.on('click', function(e) {
+                onMapClick(e);
+            });
+            
+            layer.addTo(barangayLayer);
+        }
+    });
+}
+
 
 async function loadHazardData() {
     try {
@@ -104,7 +163,6 @@ function onMapClick(e) {
     currentMarker = L.marker([lat, lng]).addTo(map);
     showLocationInfo(lat, lng);
 }
-
 async function showLocationInfo(lat, lng) {
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -122,28 +180,75 @@ async function showLocationInfo(lat, lng) {
     `;
 
     try {
-        const response = await fetch(`/api/location-info/?lat=${lat}&lng=${lng}`);
+        const response = await fetch(`/api/barangay-from-point/?lat=${lat}&lng=${lng}`);
         const locationData = await response.json();
         
         if (response.ok && locationData.success) {
+            // Format population with commas
+            const population = locationData.population_2020 
+                ? locationData.population_2020.toLocaleString() 
+                : 'N/A';
+            
+            // Format area
+            const area = locationData.area_hectares 
+                ? locationData.area_hectares.toFixed(2) 
+                : 'N/A';
+            
+            // Format district
+            const district = locationData.district 
+                ? locationData.district 
+                : 'N/A';
+            
+            // Format population density
+            const density = locationData.population_density 
+                ? `${locationData.population_density.toLocaleString()} people/hectare` 
+                : 'N/A';
+            
             locationInfo.innerHTML = `
                 <div class="location-header">
                     <div class="location-icon">📍</div>
                     <div class="location-details">
                         <div class="location-barangay">${locationData.barangay}</div>
                         <div class="location-municipality">${locationData.municipality}, ${locationData.province}</div>
-                        <div class="location-coordinates">
+                        
+                        <!-- NEW: Barangay Statistics Section -->
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.8rem; color: #6b7280;">
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">Population (2020):</span><br>
+                                    <span style="color: #1f2937;">${population}</span>
+                                </div>
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">Area:</span><br>
+                                    <span style="color: #1f2937;">${area} ha</span>
+                                </div>
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">District:</span><br>
+                                    <span style="color: #1f2937;">${district}</span>
+                                </div>
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">Density:</span><br>
+                                    <span style="color: #1f2937;">${density}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="location-coordinates" style="margin-top: 0.75rem;">
                             <span>${lat.toFixed(6)}°N, ${lng.toFixed(6)}°E</span>
                         </div>
                     </div>
                 </div>
             `;
         } else {
+            // Fallback if point is outside barangay boundaries
             locationInfo.innerHTML = `
                 <div class="location-header">
                     <div class="location-icon">📍</div>
                     <div class="location-details">
                         <div class="location-barangay">Selected Location</div>
+                        <div style="font-size: 0.85rem; color: #f59e0b; margin: 0.5rem 0;">
+                            ⚠️ Outside mapped barangay boundaries
+                        </div>
                         <div class="location-coordinates">
                             <span>${lat.toFixed(6)}°N, ${lng.toFixed(6)}°E</span>
                         </div>
@@ -188,9 +293,93 @@ async function getHazardInfoForLocation(lat, lng, container) {
 
         if (response.ok) {
             const overall = data.overall_risk;
+            const suitability = data.suitability;  // NEW: Get suitability data
             
-            // IMPROVED: Better visual hierarchy and clearer information
             let html = `
+                <!-- SUITABILITY SCORE CARD - NEW PRIMARY INDICATOR -->
+                <div class="suitability-card" style="background: linear-gradient(135deg, ${suitability.color}15 0%, ${suitability.color}25 100%); border: 2px solid ${suitability.color}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.07);">
+                    <div style="text-align: center; margin-bottom: 1rem;">
+                        <div style="font-size: 0.75rem; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem;">
+                            Development Suitability
+                        </div>
+                        <div style="font-size: 2.5rem; font-weight: 800; color: ${suitability.color}; line-height: 1; margin-bottom: 0.25rem;">
+                            ${suitability.score}
+                        </div>
+                        <div style="font-size: 0.9rem; color: #9ca3af; font-weight: 600;">/100</div>
+                    </div>
+                    
+                    <div style="width: 100%; height: 14px; background: #e5e7eb; border-radius: 9999px; overflow: hidden; margin-bottom: 1rem; position: relative;">
+                        <div style="width: ${suitability.score}%; height: 100%; background: linear-gradient(90deg, ${suitability.color} 0%, ${adjustColorBrightness(suitability.color, -20)} 100%); transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 8px ${suitability.color}50;"></div>
+                    </div>
+                    
+                    <div style="background: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 1.1rem; font-weight: 700; color: ${suitability.color}; margin-bottom: 0.5rem; text-align: center;">
+                            ${suitability.category}
+                        </div>
+                        <div style="font-size: 0.875rem; color: #4b5563; text-align: center; line-height: 1.6;">
+                            ${suitability.recommendation}
+                        </div>
+                    </div>
+                    
+                    <!-- Suitability Breakdown -->
+                    <details style="cursor: pointer;">
+                        <summary style="font-size: 0.85rem; color: #6b7280; font-weight: 600; padding: 0.75rem; background: white; border-radius: 6px; margin-bottom: 0.5rem;">
+                            📊 View Score Breakdown
+                        </summary>
+                        <div style="background: white; padding: 1rem; border-radius: 6px; margin-top: 0.5rem;">
+                            <!-- DISASTER SAFETY -->
+                            <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 0.85rem; color: #1f2937; font-weight: 700;">🛡️ Disaster Safety (60%)</span>
+                                    <span style="font-size: 0.9rem; color: ${suitability.color}; font-weight: 700;">${suitability.breakdown.safety}</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+                                    <div style="width: ${(suitability.breakdown.safety / 60) * 100}%; height: 100%; background: ${suitability.color}; transition: width 0.5s;"></div>
+                                </div>
+                                <p style="margin: 0; font-size: 0.75rem; color: #6b7280; line-height: 1.5;">
+                                    ${suitability.breakdown.safety_description}
+                                </p>
+                            </div>
+                            
+                            <!-- ACCESSIBILITY -->
+                            <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 0.85rem; color: #1f2937; font-weight: 700;">🏥 Accessibility (20%)</span>
+                                    <span style="font-size: 0.9rem; color: ${suitability.color}; font-weight: 700;">${suitability.breakdown.accessibility}</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+                                    <div style="width: ${(suitability.breakdown.accessibility / 20) * 100}%; height: 100%; background: ${suitability.color}; transition: width 0.5s;"></div>
+                                </div>
+                                <p style="margin: 0; font-size: 0.75rem; color: #6b7280; line-height: 1.5;">
+                                    ${suitability.breakdown.accessibility_description}
+                                </p>
+                            </div>
+                            
+                            <!-- INFRASTRUCTURE -->
+                            <div style="margin-bottom: 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 0.85rem; color: #1f2937; font-weight: 700;">🏘️ Infrastructure (20%)</span>
+                                    <span style="font-size: 0.9rem; color: ${suitability.color}; font-weight: 700;">${suitability.breakdown.infrastructure}</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+                                    <div style="width: ${(suitability.breakdown.infrastructure / 20) * 100}%; height: 100%; background: ${suitability.color}; transition: width 0.5s;"></div>
+                                </div>
+                                <p style="margin: 0; font-size: 0.75rem; color: #6b7280; line-height: 1.5;">
+                                    ${suitability.breakdown.infrastructure_description}
+                                </p>
+                            </div>
+                            
+                            <!-- EXPLANATION -->
+                            <div style="margin-top: 1rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; border-left: 3px solid ${suitability.color};">
+                                <p style="margin: 0; font-size: 0.7rem; color: #4b5563; line-height: 1.6;">
+                                    <em>Disaster safety is weighted at 60% to prioritize life safety over convenience.</em>
+                                </p>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                
+            
                 <!-- OVERALL RISK SCORE CARD - Enhanced Design -->
                 <div class="risk-score-card" style="background: linear-gradient(135deg, ${overall.color}15 0%, ${overall.color}25 100%); border: 2px solid ${overall.color}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.07);">
                     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
@@ -208,7 +397,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
                     <!-- Risk Score Bar -->
                     <div class="score-container" style="background: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
                         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem;">
-                            <span style="font-size: 0.8rem; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">RISK SCORE</span>
+                            <span style="font-size: 0.8rem; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">DISASTER RISK SCORE</span>
                             <div>
                                 <span style="font-size: 2rem; font-weight: 800; color: ${overall.color};">${overall.score}</span>
                                 <span style="font-size: 1.2rem; color: #9ca3af; font-weight: 600;">/100</span>
@@ -224,13 +413,28 @@ async function getHazardInfoForLocation(lat, lng, container) {
                         ${overall.safety_level}
                     </div>
                     
-                    <!-- Recommendation Box -->
-                    <div class="recommendation-box" style="background: white; border-left: 4px solid ${overall.color}; border-radius: 6px; padding: 1rem; font-size: 0.875rem; line-height: 1.6; color: #374151;">
-                        <div style="font-weight: 700; color: ${overall.color}; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                            <span>💡</span>
-                            <span>Recommendation</span>
+                    <!-- Collapsible Recommendation Button -->
+                    <div class="recommendation-box" style="background: white; border-left: 4px solid ${overall.color}; border-radius: 6px; padding: 0; overflow: hidden; margin-top: 1rem;">
+                        <button 
+                            onclick="toggleRecommendations()" 
+                            id="rec-toggle-btn"
+                            style="width: 100%; padding: 1rem; background: ${overall.color}10; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s;"
+                            onmouseover="this.style.background='${overall.color}20'"
+                            onmouseout="this.style.background='${overall.color}10'">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <span style="font-size: 1.5rem;">💡</span>
+                                <div style="text-align: left;">
+                                    <div style="font-weight: 700; color: ${overall.color}; font-size: 0.95rem;">View Mitigation Recommendations</div>
+                                    <div style="font-size: 0.8rem; color: #6b7280; margin-top: 0.25rem;">${overall.recommendation_summary}</div>
+                                </div>
+                            </div>
+                            <span id="rec-arrow" style="font-size: 1.25rem; color: ${overall.color}; transition: transform 0.3s;">▼</span>
+                        </button>
+                        <div id="rec-content" style="max-height: 0; overflow: hidden; transition: max-height 0.5s ease-out;">
+                            <div style="background: #fafbfc; border-top: 1px solid #e5e7eb;">
+                                ${overall.recommendation_details}
+                            </div>
                         </div>
-                        ${overall.recommendation}
                     </div>
                 </div>
 
@@ -270,7 +474,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
                 data.landslide.level
             );
 
-            // LIQUEFACTION HAZARD CARD (FIXED LABEL)
+            // LIQUEFACTION HAZARD CARD
             const liquefactionColor = getColorForLevel(data.liquefaction.level);
             const liquefactionSeverity = getSeverityLevel(data.liquefaction.level);
             html += createHazardCard(
@@ -316,6 +520,11 @@ function createHazardCard(icon, title, description, color, severity, level) {
         ? `background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 2px solid ${color}; box-shadow: 0 4px 8px rgba(139, 26, 26, 0.2);`
         : `background: ${color}08; border: 1px solid ${color}40;`;
     
+    // ADD THIS WARNING BOX for debris flow
+    const debrisFlowWarning = isDebrisFlow 
+        ? '<div style="margin-top: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px; font-size: 0.75rem; color: #991b1b; font-weight: 600;">⚡ CONSTRUCTION PROHIBITED - EVACUATION ZONE</div>' 
+        : '';
+    
     return `
         <div class="hazard-card" style="${cardStyle} border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; transition: all 0.2s;">
             <div style="display: flex; align-items: start; gap: 0.75rem;">
@@ -328,7 +537,7 @@ function createHazardCard(icon, title, description, color, severity, level) {
                     <p style="font-size: 0.875rem; color: #4b5563; line-height: 1.5; margin: 0;">
                         ${description}
                     </p>
-                    ${isDebrisFlow ? '<div style="margin-top: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px; font-size: 0.75rem; color: #991b1b; font-weight: 600;">⚡ IMMEDIATE EVACUATION REQUIRED DURING HEAVY RAIN</div>' : ''}
+                    ${debrisFlowWarning}
                 </div>
             </div>
         </div>
@@ -433,6 +642,15 @@ function setupLegendControls() {
 }
 
 function setupLayerToggles() {
+    // NEW: Barangay boundary toggle
+    document.getElementById('barangay-toggle').addEventListener('change', function (e) {
+        if (e.target.checked) {
+            map.addLayer(barangayLayer);
+        } else {
+            map.removeLayer(barangayLayer);
+        }
+    });
+
     document.getElementById('flood-toggle').addEventListener('change', function (e) {
         if (e.target.checked) {
             map.addLayer(floodLayer);
@@ -664,18 +882,20 @@ function displayFacilities(data) {
             </h5>
     `;
     
-    // Nearest Evacuation
-    if (data.summary.nearest_evacuation) {
-        const evac = data.summary.nearest_evacuation;
-        const walkIcon = evac.is_walkable ? '✅' : '⚠️';
-        const walkStatus = evac.is_walkable ? 'Walking distance' : 'Requires transport';
+    // Nearest Hospital
+    if (data.summary.nearest_hospital) {
+        const hosp = data.summary.nearest_hospital;
+        const walkIcon = hosp.is_walkable ? '✅' : '⚠️';
+        const walkStatus = hosp.is_walkable ? 'Walking distance' : 'Requires transport';
+        const travelTime = hosp.duration ? `🚗 ${hosp.duration} drive` : '';  // ADD THIS LINE
+        
         html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Evacuation Center</div>
-                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${evac.name}</div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${evac.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280; font-style: italic;">${walkStatus}</span>
+            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #ef4444;">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Medical Facility</div>
+                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${hosp.name}</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${hosp.distance} away</span>
+                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
                 </div>
             </div>
         `;
@@ -793,6 +1013,10 @@ function createFacilityCard(facility, borderColor, bgColor, facilityId) {
     const walkBadge = facility.is_walkable 
         ? '<span style="background: #10b981; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">WALKABLE</span>'
         : '';
+    // NEW: Add travel time display
+    const travelTime = facility.duration_display 
+        ? `<span style="font-size: 0.75rem; color: #6b7280;">🚗 ${facility.duration_display} drive</span>` 
+        : '';
     
     return `
         <div class="facility-card" data-facility-id="${facilityId}" data-lat="${facility.lat}" data-lng="${facility.lng}" 
@@ -869,6 +1093,24 @@ function attachFacilityClickListeners() {
     });
 }
 
+function toggleRecommendations() {
+    const content = document.getElementById('rec-content');
+    const arrow = document.getElementById('rec-arrow');
+    const button = document.getElementById('rec-toggle-btn');
+    
+    if (content.style.maxHeight && content.style.maxHeight !== '0px') {
+        // Collapse
+        content.style.maxHeight = '0px';
+        arrow.style.transform = 'rotate(0deg)';
+        arrow.textContent = '▼';
+    } else {
+        // Expand
+        content.style.maxHeight = content.scrollHeight + 'px';
+        arrow.style.transform = 'rotate(180deg)';
+        arrow.textContent = '▲';
+    }
+}
+
 // Initialize everything when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
     initMap();
@@ -879,4 +1121,5 @@ document.addEventListener('DOMContentLoaded', function () {
     setupLayerToggles();
     setupUploadModal();
     setupSearch();
+
 });
