@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from django.contrib.gis.geos import Point
 from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility
 from .utils import ShapefileProcessor
-from .utils import RoadDistanceCalculator
+from .utils import HybridDistanceCalculator
 from .overpass_client import OverpassClient
 from math import radians, cos, sin, asin, sqrt
 import json
@@ -200,11 +200,10 @@ def get_location_hazards(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
     
+
 @api_view(['GET'])
 def get_nearby_facilities(request):
     """Get facilities within specified radius with disaster-priority grouping"""
-    from .utils import RoadDistanceCalculator
-    
     try:
         lat = float(request.GET.get('lat'))
         lng = float(request.GET.get('lng'))
@@ -213,30 +212,47 @@ def get_nearby_facilities(request):
         # Get facilities from Overpass
         facilities = OverpassClient.query_facilities(lat, lng, radius)
         
-        # Calculate ROAD distances for all facilities
-        print(f"🚗 Calculating road distances for {len(facilities)} facilities...")
-        facilities = RoadDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
+        # VALIDATION: Check if we got any facilities
+        if not facilities or len(facilities) == 0:
+            return Response({
+                'error': 'No facilities found in this area',
+                'summary': {
+                    'nearest_evacuation': None,
+                    'nearest_hospital': None,
+                    'nearest_fire_station': None,
+                },
+                'evacuation_centers': [],
+                'medical': [],
+                'emergency_services': [],
+                'essential_services': [],
+                'other': [],
+                'counts': {
+                    'evacuation': 0,
+                    'medical': 0,
+                    'emergency_services': 0,
+                    'essential': 0,
+                    'other': 0,
+                    'total': 0
+                }
+            })
         
-        # Update display format and add metadata
-        for facility in facilities:
-            facility['distance_display'] = format_distance(facility['distance_meters'])
-            facility['is_walkable'] = facility['distance_meters'] <= 500
-            
-            # Add travel time display
-            if facility.get('duration_minutes'):
-                if facility['duration_minutes'] < 1:
-                    facility['duration_display'] = "< 1 min"
-                else:
-                    facility['duration_display'] = f"{int(facility['duration_minutes'])} min"
-            else:
-                facility['duration_display'] = "N/A"
+        # Calculate distances using HybridDistanceCalculator
+        from .utils import HybridDistanceCalculator
+        facilities = HybridDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
         
-        # Sort by actual road distance
-        facilities.sort(key=lambda x: x['distance_meters'])
+        # CRITICAL: Ensure all required fields exist
+        for f in facilities:
+            # Add missing fields with defaults if not present
+            if 'distance_display' not in f:
+                f['distance_display'] = format_distance(f.get('distance_meters', 0))
+            if 'duration_display' not in f:
+                duration_min = f.get('duration_minutes', 0)
+                f['duration_display'] = f"{int(duration_min)} min" if duration_min >= 1 else "< 1 min"
+            if 'is_walkable' not in f:
+                f['is_walkable'] = f.get('distance_meters', 9999) <= 500
         
-        # Log road vs straight-line comparison
-        road_count = sum(1 for f in facilities if f.get('method') == 'road')
-        print(f"✅ Road distances: {road_count}/{len(facilities)}, Fallback: {len(facilities) - road_count}")
+        # Sort by distance
+        facilities.sort(key=lambda x: x.get('distance_meters', 999999))
         
         # Reorganize by disaster priority
         evacuation_centers = []
@@ -246,66 +262,71 @@ def get_nearby_facilities(request):
         other_facilities = []
         
         for f in facilities:
-            ftype = f.get('facility_type', '')
+            # PRIORITY 1: Use pre-assigned subcategory from Overpass
+            subcat = f.get('subcategory', '')
             
-            # Priority 1: Evacuation Centers
-            if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
-                f['subcategory'] = 'evacuation'
-                f['priority'] = 1
+            if subcat == 'evacuation':
                 evacuation_centers.append(f)
-            
-            # Priority 2: Medical Facilities
-            elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
-                f['subcategory'] = 'medical'
-                f['priority'] = 2
+            elif subcat == 'medical':
                 medical.append(f)
-            
-            # Priority 3: Emergency Services
-            elif ftype in ['fire_station', 'police']:
-                f['subcategory'] = 'emergency_services'
-                f['priority'] = 3
+            elif subcat == 'emergency_services':
                 emergency_services.append(f)
-            
-            # Priority 4: Essential Services
-            elif ftype in ['marketplace', 'supermarket', 'convenience']:
-                f['subcategory'] = 'essential'
-                f['priority'] = 4
+            elif subcat == 'essential':
                 essential_services.append(f)
-            
-            # Priority 5: Other
             else:
-                f['subcategory'] = 'other'
-                f['priority'] = 5
-                other_facilities.append(f)
+                # FALLBACK: Categorize by facility_type if subcategory is missing
+                ftype = f.get('facility_type', '')
+                
+                if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                    f['subcategory'] = 'evacuation'
+                    evacuation_centers.append(f)
+                elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                    f['subcategory'] = 'medical'
+                    medical.append(f)
+                elif ftype in ['fire_station', 'police']:
+                    f['subcategory'] = 'emergency_services'
+                    emergency_services.append(f)
+                elif ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
+                              'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                    f['subcategory'] = 'essential'
+                    essential_services.append(f)
+                else:
+                    f['subcategory'] = 'other'
+                    other_facilities.append(f)
+
+        # DEBUG LOGGING
+        print(f"📊 Categorization Results:")
+        print(f"   - Evacuation: {len(evacuation_centers)}")
+        print(f"   - Medical: {len(medical)}")
+        print(f"   - Emergency Services: {len(emergency_services)}")
+        print(f"   - Essential Services: {len(essential_services)}")
+        print(f"   - Other: {len(other_facilities)}")
+        
         
         # Find nearest of each critical type
         nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
         nearest_hospital = next((f for f in medical if f.get('facility_type') in ['hospital', 'clinic']), None)
         nearest_fire = next((f for f in emergency_services if f.get('facility_type') == 'fire_station'), None)
         
+        # CRITICAL FIX: Build summary with proper null handling
+        def build_facility_summary(facility):
+            """Helper to build facility summary with all required fields"""
+            if not facility:
+                return None
+            
+            return {
+                'name': facility.get('name', 'Unknown'),
+                'distance': facility.get('distance_display', 'N/A'),
+                'distance_meters': facility.get('distance_meters', 999999),
+                'duration': facility.get('duration_display', 'N/A'),
+                'is_walkable': facility.get('is_walkable', False),
+            }
+        
         result = {
             'summary': {
-                'nearest_evacuation': {
-                    'name': nearest_evacuation.get('name', 'Unknown'),
-                    'distance': nearest_evacuation.get('distance_display', 'N/A'),
-                    'distance_meters': nearest_evacuation.get('distance_meters', 999999),
-                    'duration': nearest_evacuation.get('duration_display', 'N/A'),
-                    'is_walkable': nearest_evacuation.get('is_walkable', False),
-                } if nearest_evacuation else None,
-                'nearest_hospital': {
-                    'name': nearest_hospital.get('name', 'Unknown'),
-                    'distance': nearest_hospital.get('distance_display', 'N/A'),
-                    'distance_meters': nearest_hospital.get('distance_meters', 999999),
-                    'duration': nearest_hospital.get('duration_display', 'N/A'),
-                    'is_walkable': nearest_hospital.get('is_walkable', False),
-                } if nearest_hospital else None,
-                'nearest_fire_station': {
-                    'name': nearest_fire.get('name', 'Unknown'),
-                    'distance': nearest_fire.get('distance_display', 'N/A'),
-                    'distance_meters': nearest_fire.get('distance_meters', 999999),
-                    'duration': nearest_fire.get('duration_display', 'N/A'),
-                    'is_walkable': nearest_fire.get('is_walkable', False),
-                } if nearest_fire else None,
+                'nearest_evacuation': build_facility_summary(nearest_evacuation),
+                'nearest_hospital': build_facility_summary(nearest_hospital),
+                'nearest_fire_station': build_facility_summary(nearest_fire),
             },
             'evacuation_centers': evacuation_centers[:10],
             'medical': medical[:10],
@@ -327,50 +348,51 @@ def get_nearby_facilities(request):
     except ValueError:
         return Response({'error': 'Invalid coordinates or radius'}, status=400)
     except Exception as e:
-        print(f"Error in get_nearby_facilities: {e}")
+        print(f"❌ Error in get_nearby_facilities: {e}")
         import traceback
         traceback.print_exc()
         return Response({'error': str(e)}, status=500)
 
 
 def get_nearby_facilities_for_suitability(lat, lng):
-    """
-    Helper function to get nearby facilities data for suitability calculation
-    Uses REAL ROAD DISTANCES via OSRM
-    """
+    """Helper function for suitability calculation"""
     from .overpass_client import OverpassClient
-    from .utils import RoadDistanceCalculator
+    from .utils import HybridDistanceCalculator
     
     try:
-        # Get facilities from Overpass API
         facilities = OverpassClient.query_facilities(lat, lng, 3000)
         
-        # Calculate ROAD distances
-        print(f"🚗 Calculating road distances for {len(facilities)} facilities...")
-        facilities = RoadDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
+        if not facilities:
+            return {
+                'summary': {
+                    'nearest_evacuation': None,
+                    'nearest_hospital': None,
+                    'nearest_fire_station': None,
+                },
+                'counts': {
+                    'evacuation': 0,
+                    'medical': 0,
+                    'emergency_services': 0,
+                    'essential': 0,
+                    'other': 0,
+                    'total': 0
+                }
+            }
         
-        # Update display format
+        facilities = HybridDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
+        
         for facility in facilities:
-            facility['distance_display'] = format_distance(facility['distance_meters'])
-            facility['is_walkable'] = facility['distance_meters'] <= 500
-            
-            # Add travel time info
-            if facility.get('duration_minutes'):
-                if facility['duration_minutes'] < 1:
-                    facility['duration_display'] = "< 1 min"
-                else:
-                    facility['duration_display'] = f"{int(facility['duration_minutes'])} min"
-            else:
-                facility['duration_display'] = "N/A"
+            if 'distance_display' not in facility:
+                facility['distance_display'] = format_distance(facility.get('distance_meters', 0))
+            if 'is_walkable' not in facility:
+                facility['is_walkable'] = facility.get('distance_meters', 9999) <= 500
+            if 'duration_display' not in facility:
+                duration_min = facility.get('duration_minutes', 0)
+                facility['duration_display'] = f"{int(duration_min)} min" if duration_min >= 1 else "< 1 min"
         
-        # Sort by road distance
-        facilities.sort(key=lambda x: x['distance_meters'])
+        facilities.sort(key=lambda x: x.get('distance_meters', 999999))
         
-        # Log road vs straight-line comparison
-        road_count = sum(1 for f in facilities if f.get('method') == 'road')
-        print(f"✅ Road distances: {road_count}/{len(facilities)}, Fallback: {len(facilities) - road_count}")
-        
-        # Categorize facilities
+        # SAME IMPROVED CATEGORIZATION as above
         evacuation_centers = []
         medical = []
         emergency_services = []
@@ -378,57 +400,56 @@ def get_nearby_facilities_for_suitability(lat, lng):
         other_facilities = []
         
         for f in facilities:
-            ftype = f.get('facility_type', '')
+            subcat = f.get('subcategory', '')
             
-            if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
-                f['subcategory'] = 'evacuation'
-                f['priority'] = 1
+            if subcat == 'evacuation':
                 evacuation_centers.append(f)
-            elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
-                f['subcategory'] = 'medical'
-                f['priority'] = 2
+            elif subcat == 'medical':
                 medical.append(f)
-            elif ftype in ['fire_station', 'police']:
-                f['subcategory'] = 'emergency_services'
-                f['priority'] = 3
+            elif subcat == 'emergency_services':
                 emergency_services.append(f)
-            elif ftype in ['marketplace', 'supermarket', 'convenience']:
-                f['subcategory'] = 'essential'
-                f['priority'] = 4
+            elif subcat == 'essential':
                 essential_services.append(f)
             else:
-                f['subcategory'] = 'other'
-                f['priority'] = 5
-                other_facilities.append(f)
+                ftype = f.get('facility_type', '')
+                
+                if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                    f['subcategory'] = 'evacuation'
+                    evacuation_centers.append(f)
+                elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                    f['subcategory'] = 'medical'
+                    medical.append(f)
+                elif ftype in ['fire_station', 'police']:
+                    f['subcategory'] = 'emergency_services'
+                    emergency_services.append(f)
+                elif ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel',
+                              'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                    f['subcategory'] = 'essential'
+                    essential_services.append(f)
+                else:
+                    f['subcategory'] = 'other'
+                    other_facilities.append(f)
         
-        # Find nearest critical facilities
         nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
         nearest_hospital = next((f for f in medical if f.get('facility_type') in ['hospital', 'clinic']), None)
         nearest_fire = next((f for f in emergency_services if f.get('facility_type') == 'fire_station'), None)
         
+        def build_facility_summary(facility):
+            if not facility:
+                return None
+            return {
+                'name': facility.get('name', 'Unknown'),
+                'distance': facility.get('distance_display', 'N/A'),
+                'distance_meters': facility.get('distance_meters', 999999),
+                'duration': facility.get('duration_display', 'N/A'),
+                'is_walkable': facility.get('is_walkable', False),
+            }
+        
         return {
             'summary': {
-                'nearest_evacuation': {
-                    'name': nearest_evacuation.get('name', 'Unknown') if nearest_evacuation else None,
-                    'distance': nearest_evacuation.get('distance_display', 'N/A') if nearest_evacuation else None,
-                    'distance_meters': nearest_evacuation.get('distance_meters', 999999) if nearest_evacuation else 999999,
-                    'duration': nearest_evacuation.get('duration_display', 'N/A') if nearest_evacuation else None,
-                    'is_walkable': nearest_evacuation.get('is_walkable', False) if nearest_evacuation else False,
-                } if nearest_evacuation else None,
-                'nearest_hospital': {
-                    'name': nearest_hospital.get('name', 'Unknown') if nearest_hospital else None,
-                    'distance': nearest_hospital.get('distance_display', 'N/A') if nearest_hospital else None,
-                    'distance_meters': nearest_hospital.get('distance_meters', 999999) if nearest_hospital else 999999,
-                    'duration': nearest_hospital.get('duration_display', 'N/A') if nearest_hospital else None,
-                    'is_walkable': nearest_hospital.get('is_walkable', False) if nearest_hospital else False,
-                } if nearest_hospital else None,
-                'nearest_fire_station': {
-                    'name': nearest_fire.get('name', 'Unknown') if nearest_fire else None,
-                    'distance': nearest_fire.get('distance_display', 'N/A') if nearest_fire else None,
-                    'distance_meters': nearest_fire.get('distance_meters', 999999) if nearest_fire else 999999,
-                    'duration': nearest_fire.get('duration_display', 'N/A') if nearest_fire else None,
-                    'is_walkable': nearest_fire.get('is_walkable', False) if nearest_fire else False,
-                } if nearest_fire else None,
+                'nearest_evacuation': build_facility_summary(nearest_evacuation),
+                'nearest_hospital': build_facility_summary(nearest_hospital),
+                'nearest_fire_station': build_facility_summary(nearest_fire),
             },
             'counts': {
                 'evacuation': len(evacuation_centers),
@@ -440,7 +461,7 @@ def get_nearby_facilities_for_suitability(lat, lng):
             }
         }
     except Exception as e:
-        print(f"ERROR in get_nearby_facilities_for_suitability: {e}")
+        print(f"❌ ERROR in get_nearby_facilities_for_suitability: {e}")
         import traceback
         traceback.print_exc()
         

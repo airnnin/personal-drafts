@@ -830,12 +830,21 @@ async function performSearch() {
 
 async function loadNearbyFacilities(lat, lng) {
     const container = document.getElementById('facilities-section');
+    
+    // Show loading with estimated time
     container.innerHTML = `
         <div style="text-align: center; padding: 2rem;">
             <div class="loading-spinner"></div>
-            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">Loading nearby facilities...</p>
+            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">
+                Finding nearby facilities...
+            </p>
+            <p style="color: #9ca3af; font-size: 0.75rem; margin-top: 0.25rem;">
+                ⚡ First load may take ~5 seconds. Subsequent loads are instant (cached).
+            </p>
         </div>
     `;
+    
+    const startTime = Date.now();
     
     try {
         const response = await fetch(`/api/nearby-facilities/?lat=${lat}&lng=${lng}&radius=3000`);
@@ -845,6 +854,10 @@ async function loadNearbyFacilities(lat, lng) {
         }
         
         const data = await response.json();
+        const loadTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        
+        console.log(`✅ Facilities loaded in ${loadTime} seconds`);
+        
         displayFacilities(data);
         
     } catch (error) {

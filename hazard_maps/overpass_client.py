@@ -1,111 +1,72 @@
 import requests
 import time
 from typing import Dict, List
+from math import radians, cos, sin, asin, sqrt
 
 class OverpassClient:
     """Client for querying OpenStreetMap via Overpass API"""
     
     BASE_URL = "https://overpass-api.de/api/interpreter"
 
-    # Official OSM amenity tags
+    # Comprehensive facility mapping
     AMENITY_MAPPING = {
-        # Medical/Health
-        'hospital': {'category': 'emergency', 'name': 'Hospital'},
-        'clinic': {'category': 'emergency', 'name': 'Clinic'},
-        'doctors': {'category': 'emergency', 'name': 'Medical Clinic'},
-        'dentist': {'category': 'emergency', 'name': 'Dental Clinic'},
-        'pharmacy': {'category': 'emergency', 'name': 'Pharmacy'},
+        # CRITICAL FACILITIES (Priority 1-2) - GET ALL
+        'hospital': {'category': 'emergency', 'name': 'Hospital', 'priority': 1, 'subcat': 'medical'},
+        'clinic': {'category': 'emergency', 'name': 'Clinic', 'priority': 1, 'subcat': 'medical'},
+        'doctors': {'category': 'emergency', 'name': 'Medical Clinic', 'priority': 1, 'subcat': 'medical'},
+        'pharmacy': {'category': 'emergency', 'name': 'Pharmacy', 'priority': 2, 'subcat': 'medical'},
+        'fire_station': {'category': 'emergency', 'name': 'Fire Station', 'priority': 1, 'subcat': 'emergency_services'},
+        'police': {'category': 'emergency', 'name': 'Police Station', 'priority': 1, 'subcat': 'emergency_services'},
         
-        # Emergency Services
-        'fire_station': {'category': 'emergency', 'name': 'Fire Station'},
-        'police': {'category': 'emergency', 'name': 'Police Station'},
+        # EVACUATION CENTERS (Priority 1-2) - GET ALL
+        'school': {'category': 'everyday', 'name': 'School', 'priority': 1, 'subcat': 'evacuation'},
+        'kindergarten': {'category': 'everyday', 'name': 'Kindergarten', 'priority': 2, 'subcat': 'evacuation'},
+        'college': {'category': 'everyday', 'name': 'College', 'priority': 1, 'subcat': 'evacuation'},
+        'university': {'category': 'everyday', 'name': 'University', 'priority': 1, 'subcat': 'evacuation'},
+        'community_centre': {'category': 'government', 'name': 'Community Center', 'priority': 1, 'subcat': 'evacuation'},
         
-        # Education
-        'school': {'category': 'everyday', 'name': 'School'},
-        'kindergarten': {'category': 'everyday', 'name': 'Kindergarten'},
-        'college': {'category': 'everyday', 'name': 'College'},
-        'university': {'category': 'everyday', 'name': 'University'},
+        # ESSENTIAL SERVICES (Priority 3) - GET NEAREST ONLY
+        'marketplace': {'category': 'everyday', 'name': 'Market', 'priority': 3, 'subcat': 'essential'},
+        'bank': {'category': 'everyday', 'name': 'Bank', 'priority': 3, 'subcat': 'essential'},
+        'atm': {'category': 'everyday', 'name': 'ATM', 'priority': 4, 'subcat': 'essential'},
+        'fuel': {'category': 'everyday', 'name': 'Gas Station', 'priority': 3, 'subcat': 'essential'},
+        'restaurant': {'category': 'everyday', 'name': 'Restaurant', 'priority': 4, 'subcat': 'essential'},
+        'fast_food': {'category': 'everyday', 'name': 'Fast Food', 'priority': 4, 'subcat': 'essential'},
+        'cafe': {'category': 'everyday', 'name': 'Cafe', 'priority': 4, 'subcat': 'essential'},
         
-        # Food & Dining
-        'restaurant': {'category': 'everyday', 'name': 'Restaurant'},
-        'fast_food': {'category': 'everyday', 'name': 'Fast Food'},
-        'cafe': {'category': 'everyday', 'name': 'Cafe'},
-        
-        # Shopping
-        'marketplace': {'category': 'everyday', 'name': 'Market'},
-        'bank': {'category': 'everyday', 'name': 'Bank'},
-        'atm': {'category': 'everyday', 'name': 'ATM'},
-        
-        # Transportation
-        'fuel': {'category': 'everyday', 'name': 'Gas Station'},
-        'bus_station': {'category': 'everyday', 'name': 'Bus Station'},
-        'ferry_terminal': {'category': 'everyday', 'name': 'Ferry Terminal'},
-        
-        # Worship
-        'place_of_worship': {'category': 'everyday', 'name': 'Place of Worship'},
-        
-        # Government
-        'townhall': {'category': 'government', 'name': 'Municipal/Town Hall'},
-        'community_centre': {'category': 'government', 'name': 'Community Center'},
+        # GOVERNMENT (Priority 2-3)
+        'townhall': {'category': 'government', 'name': 'Town/Municipal Hall', 'priority': 2, 'subcat': 'government'},
+        'public_building': {'category': 'government', 'name': 'Public Building', 'priority': 3, 'subcat': 'government'},
     }
 
     SHOP_MAPPING = {
-        'supermarket': {'category': 'everyday', 'name': 'Supermarket'},
-        'convenience': {'category': 'everyday', 'name': 'Convenience Store'},
-        'mall': {'category': 'everyday', 'name': 'Shopping Mall'},
+        'supermarket': {'category': 'everyday', 'name': 'Supermarket', 'priority': 3, 'subcat': 'essential'},
+        'convenience': {'category': 'everyday', 'name': 'Convenience Store', 'priority': 3, 'subcat': 'essential'},
+        'mall': {'category': 'everyday', 'name': 'Shopping Mall', 'priority': 3, 'subcat': 'essential'},
+        'department_store': {'category': 'everyday', 'name': 'Department Store', 'priority': 3, 'subcat': 'essential'},
     }
 
     OFFICE_MAPPING = {
-        'government': {'category': 'government', 'name': 'Government Office'},
+        'government': {'category': 'government', 'name': 'Government Office', 'priority': 3, 'subcat': 'government'},
     }
-    
-    # Map OSM amenity tags to our categories
-    FACILITY_MAPPING = {
-        # Emergency & Disaster-Related
-        'hospital': {'category': 'emergency', 'name': 'Hospital'},
-        'clinic': {'category': 'emergency', 'name': 'Clinic'},
-        'doctors': {'category': 'emergency', 'name': 'Medical Clinic'},
-        'fire_station': {'category': 'emergency', 'name': 'Fire Station'},
-        'police': {'category': 'emergency', 'name': 'Police Station'},
-        'pharmacy': {'category': 'emergency', 'name': 'Pharmacy'},
-        
-        # Everyday Life
-        'school': {'category': 'everyday', 'name': 'School'},
-        'college': {'category': 'everyday', 'name': 'College'},
-        'university': {'category': 'everyday', 'name': 'University'},
-        'marketplace': {'category': 'everyday', 'name': 'Market'},
-        'fuel': {'category': 'everyday', 'name': 'Gas Station'},
-        'bank': {'category': 'everyday', 'name': 'Bank'},
-        'atm': {'category': 'everyday', 'name': 'ATM'},
-        'bus_station': {'category': 'everyday', 'name': 'Bus Station'},
-        'ferry_terminal': {'category': 'everyday', 'name': 'Ferry Terminal'},
-        
-        # Government & Administrative
-        'townhall': {'category': 'government', 'name': 'Town/Municipal Hall'},
-        'community_centre': {'category': 'government', 'name': 'Community Center'},
-        'public_building': {'category': 'government', 'name': 'Public Building'},
-    }
-    
-    # Shop types for everyday facilities
-    SHOP_TYPES = ['supermarket', 'convenience', 'mall']
     
     @classmethod
     def query_facilities(cls, lat: float, lng: float, radius: int = 3000) -> List[Dict]:
         """
-        Query OSM for facilities around a point
-        Simplified query to avoid timeouts
+        BALANCED QUERY: All critical facilities + nearest essential services
+        Returns ~50-70 facilities total
         """
         
-        # Simplified query - using regex to group similar tags
+        # COMPREHENSIVE QUERY: Include all facility types
         query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:20];
         (
         nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|fire_station|police)$"](around:{radius},{lat},{lng});
-        nwr["amenity"~"^(school|university|college|restaurant|fast_food|cafe)$"](around:{radius},{lat},{lng});
-        nwr["amenity"~"^(bank|atm|fuel|marketplace|townhall|community_centre)$"](around:{radius},{lat},{lng});
-        nwr["shop"~"^(supermarket|convenience|mall)$"](around:{radius},{lat},{lng});
+        nwr["amenity"~"^(school|kindergarten|college|university|community_centre)$"](around:{radius},{lat},{lng});
+        nwr["amenity"~"^(marketplace|bank|atm|fuel|townhall|public_building)$"](around:{radius},{lat},{lng});
+        nwr["amenity"~"^(restaurant|fast_food|cafe)$"](around:{radius},{lat},{lng});
+        nwr["shop"~"^(supermarket|convenience|mall|department_store)$"](around:{radius},{lat},{lng});
         nwr["office"="government"](around:{radius},{lat},{lng});
-        nwr["healthcare"="hospital"](around:{radius},{lat},{lng});
         );
         out center;
         """
@@ -114,7 +75,7 @@ class OverpassClient:
             response = requests.post(
                 cls.BASE_URL,
                 data={'data': query},
-                timeout=30
+                timeout=25
             )
             response.raise_for_status()
             data = response.json()
@@ -127,32 +88,80 @@ class OverpassClient:
                 if osm_id not in seen_ids:
                     facility = cls._parse_element(element)
                     if facility:
+                        # Calculate straight-line distance
+                        facility['straight_distance'] = cls._haversine_distance(
+                            lat, lng, facility['lat'], facility['lng']
+                        )
                         facilities.append(facility)
                         seen_ids.add(osm_id)
             
-            return facilities
+            # SMART FILTERING: Keep all critical, limit non-critical
+            critical_facilities = []
+            essential_facilities = []
+            other_facilities = []
+            
+            for f in facilities:
+                priority = f.get('priority', 9)
+                subcat = f.get('subcategory', 'other')
+                
+                if priority <= 2:  # Critical: hospitals, fire stations, schools
+                    critical_facilities.append(f)
+                elif subcat == 'essential':  # Essential services
+                    essential_facilities.append(f)
+                else:  # Other
+                    other_facilities.append(f)
+            
+            # Sort each group by distance
+            critical_facilities.sort(key=lambda x: x['straight_distance'])
+            essential_facilities.sort(key=lambda x: x['straight_distance'])
+            other_facilities.sort(key=lambda x: x['straight_distance'])
+            
+            # BALANCED SELECTION:
+            # - ALL critical facilities (hospitals, fire, schools) - usually 30-40
+            # - Top 20 essential services (markets, banks, restaurants)
+            # - Top 10 other facilities
+            final_facilities = (
+                critical_facilities[:50] +           # Max 50 critical
+                essential_facilities[:20] +          # Max 20 essential
+                other_facilities[:10]                # Max 10 other
+            )
+            
+            # Re-sort by priority then distance
+            final_facilities.sort(key=lambda x: (x.get('priority', 9), x['straight_distance']))
+            
+            # Count by subcategory for debugging
+            from collections import Counter
+            subcats = Counter(f.get('subcategory', 'other') for f in final_facilities)
+            
+            print(f"✅ Overpass API returned {len(final_facilities)} facilities (from {len(facilities)} total):")
+            print(f"   - Medical: {subcats.get('medical', 0)}")
+            print(f"   - Emergency Services: {subcats.get('emergency_services', 0)}")
+            print(f"   - Evacuation Centers: {subcats.get('evacuation', 0)}")
+            print(f"   - Essential Services: {subcats.get('essential', 0)}")
+            print(f"   - Government: {subcats.get('government', 0)}")
+            print(f"   - Other: {subcats.get('other', 0)}")
+            
+            return final_facilities
             
         except requests.exceptions.Timeout:
-            print(f"Overpass API timeout - query took too long")
-            return []
-        except requests.exceptions.RequestException as e:
-            print(f"Overpass API error: {e}")
+            print(f"⚠️ Overpass API timeout")
             return []
         except Exception as e:
-            print(f"Error parsing Overpass response: {e}")
+            print(f"⚠️ Overpass API error: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     @classmethod
     def _parse_element(cls, element: Dict) -> Dict:
-        """Parse OSM element into facility dict"""
+        """Parse OSM element into facility dict with proper subcategorization"""
         tags = element.get('tags', {})
         
-        # Get coordinates (different for nodes vs ways)
+        # Get coordinates
         if element.get('type') == 'node':
             lat = element.get('lat')
             lng = element.get('lon')
-        elif element.get('type') == 'way':
-            # For ways, use the center coordinates
+        elif element.get('type') in ['way', 'relation']:
             center = element.get('center', {})
             lat = center.get('lat')
             lng = center.get('lon')
@@ -162,25 +171,22 @@ class OverpassClient:
         if not lat or not lng:
             return None
         
-        # Determine facility type and category
+        # Determine facility type, category, and subcategory
         facility_type = None
         category = None
         type_display = None
+        priority = 9
+        subcategory = None
         
-        # Check amenity tag first (most common)
+        # Check amenity tag
         if 'amenity' in tags:
             facility_type = tags['amenity']
             facility_info = cls.AMENITY_MAPPING.get(facility_type)
             if facility_info:
                 category = facility_info['category']
                 type_display = facility_info['name']
-        
-        # Check healthcare tag
-        elif 'healthcare' in tags:
-            if tags['healthcare'] == 'hospital':
-                facility_type = 'hospital'
-                category = 'emergency'
-                type_display = 'Hospital'
+                priority = facility_info['priority']
+                subcategory = facility_info.get('subcat')
         
         # Check shop tag
         elif 'shop' in tags:
@@ -189,6 +195,8 @@ class OverpassClient:
             if facility_info:
                 category = facility_info['category']
                 type_display = facility_info['name']
+                priority = facility_info['priority']
+                subcategory = facility_info.get('subcat')
         
         # Check office tag
         elif 'office' in tags:
@@ -197,19 +205,16 @@ class OverpassClient:
             if facility_info:
                 category = facility_info['category']
                 type_display = facility_info['name']
+                priority = facility_info['priority']
+                subcategory = facility_info.get('subcat')
         
-        # If no valid facility type found
         if not category or not type_display:
-            # Check if it's a barangay hall by name
-            name = tags.get('name', '').lower()
-            if 'barangay' in name:
-                facility_type = 'barangay_hall'
-                category = 'government'
-                type_display = 'Barangay Hall'
-            else:
-                return None
+            return None
         
-        # Get facility name
+        # Ensure subcategory is set
+        if not subcategory:
+            subcategory = 'other'
+        
         name = tags.get('name') or tags.get('name:en') or f"Unnamed {type_display}"
         
         return {
@@ -219,21 +224,25 @@ class OverpassClient:
             'facility_type': facility_type,
             'type_display': type_display,
             'category': category,
+            'subcategory': subcategory,
+            'priority': priority,
             'lat': lat,
             'lng': lng,
         }
+    
+    @classmethod
+    def _haversine_distance(cls, lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+        """Calculate straight-line distance in meters"""
+        lat1, lng1, lat2, lng2 = map(radians, [lat1, lng1, lat2, lng2])
+        dlat = lat2 - lat1
+        dlng = lng2 - lng1
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
+        c = 2 * asin(sqrt(a))
+        return 6371000 * c
+    
     @classmethod
     def get_location_info(cls, lat: float, lng: float) -> Dict:
-        """
-        Get administrative boundary information for a point using Nominatim reverse geocoding
-        
-        Args:
-            lat: Latitude
-            lng: Longitude
-            
-        Returns:
-            Dictionary with location details
-        """
+        """Get administrative boundary information"""
         nominatim_url = "https://nominatim.openstreetmap.org/reverse"
         
         params = {
@@ -241,11 +250,11 @@ class OverpassClient:
             'lon': lng,
             'format': 'json',
             'addressdetails': 1,
-            'zoom': 18,  # Detailed zoom level to get barangay
+            'zoom': 18,
         }
         
         headers = {
-            'User-Agent': 'DisasterRiskAssessmentSystem/1.0'  # Required by Nominatim
+            'User-Agent': 'DisasterRiskAssessmentSystem/1.0'
         }
         
         try:
@@ -260,10 +269,8 @@ class OverpassClient:
             
             address = data.get('address', {})
             
-            # Extract location components
-            # Nominatim uses different keys for Philippine barangays
             barangay = (
-                address.get('suburb') or  # Sometimes barangay is tagged as suburb
+                address.get('suburb') or
                 address.get('neighbourhood') or 
                 address.get('village') or
                 address.get('hamlet') or
@@ -287,8 +294,8 @@ class OverpassClient:
                 'success': True
             }
             
-        except requests.exceptions.RequestException as e:
-            print(f"Nominatim reverse geocoding error: {e}")
+        except Exception as e:
+            print(f"Nominatim error: {e}")
             return {
                 'barangay': 'Unknown',
                 'municipality': 'Unknown',
