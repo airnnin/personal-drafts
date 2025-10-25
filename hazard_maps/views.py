@@ -4,9 +4,10 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.contrib.gis.geos import Point
-from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility
+from django.core.cache import cache
+from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility, BarangayBoundaryNew
 from .utils import ShapefileProcessor
-from .utils import HybridDistanceCalculator
+from .utils import calculate_haversine_distance
 from .overpass_client import OverpassClient
 from math import radians, cos, sin, asin, sqrt
 import json
@@ -18,10 +19,10 @@ def index(request):
 @csrf_exempt
 @api_view(['POST'])
 def upload_shapefile(request):
-    """Handle shapefile upload and processing"""
+    """Handle shapefile/CSV upload and processing"""
     if request.method == 'POST':
         if 'shapefile' not in request.FILES:
-            return JsonResponse({'error': 'No shapefile provided'}, status=400)
+            return JsonResponse({'error': 'No file provided'}, status=400)
         
         if 'dataset_type' not in request.POST:
             return JsonResponse({'error': 'Dataset type not specified'}, status=400)
@@ -29,11 +30,40 @@ def upload_shapefile(request):
         uploaded_file = request.FILES['shapefile']
         dataset_type = request.POST['dataset_type']
         
-        valid_types = ['flood', 'landslide', 'liquefaction', 'barangay']
+        # Valid types
+        valid_types = [
+            'flood', 'landslide', 'liquefaction', 'barangay', 'barangay_new', 
+            'municipality_characteristics', 'barangay_characteristics', 'zonal_values'
+        ]
         if dataset_type not in valid_types:
-            return JsonResponse({'error': f'Invalid dataset type. Must be one of: {valid_types}'}, status=400)
+            return JsonResponse({
+                'error': f'Invalid dataset type. Must be one of: {valid_types}'
+            }, status=400)
         
-        processor = ShapefileProcessor(uploaded_file, dataset_type)
+        # NEW: Check file type based on dataset type
+        file_name = uploaded_file.name.lower()
+        
+        # CSV datasets - accept .csv files directly
+        if dataset_type in ['municipality_characteristics', 'barangay_characteristics','zonal_values']:
+            if not file_name.endswith('.csv'):
+                return JsonResponse({
+                    'error': 'Please upload a .csv file for this dataset type'
+                }, status=400)
+            
+            # Use CSV processor
+            from .utils import CSVProcessor
+            processor = CSVProcessor(uploaded_file, dataset_type)
+        
+        # Shapefile datasets - require .zip files
+        else:
+            if not file_name.endswith('.zip'):
+                return JsonResponse({
+                    'error': 'Please upload a .zip file containing shapefile data'
+                }, status=400)
+            
+            # Use Shapefile processor
+            processor = ShapefileProcessor(uploaded_file, dataset_type)
+        
         result = processor.process()
         
         if result['success']:
@@ -161,9 +191,22 @@ def get_location_hazards(request):
         # Calculate overall risk
         risk_assessment = calculate_risk_score(flood_level, landslide_level, liquefaction_level)
         
-        # NEW: Get nearby facilities for suitability calculation
+        # OPTIMIZED: Cache facility data to avoid duplicate API calls
         try:
-            nearby_facilities = get_nearby_facilities_for_suitability(lat, lng)
+            # Try to get from cache first (stored by get_nearby_facilities)
+            cache_key = f"facilities_{round(lat, 4)}_{round(lng, 4)}"
+            from django.core.cache import cache
+            
+            nearby_facilities = cache.get(cache_key)
+            
+            if nearby_facilities is None:
+                # If not cached, fetch and cache for 5 minutes
+                nearby_facilities = get_nearby_facilities_for_suitability(lat, lng)
+                cache.set(cache_key, nearby_facilities, 300)  # 5 minutes
+                print(f"✅ Cached facility data for suitability calculation")
+            else:
+                print(f"✅ Using cached facility data")
+                
         except Exception as e:
             print(f"Error getting facilities for suitability: {e}")
             nearby_facilities = {'counts': {}, 'summary': {}}
@@ -200,14 +243,22 @@ def get_location_hazards(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
     
-
 @api_view(['GET'])
 def get_nearby_facilities(request):
-    """Get facilities within specified radius with disaster-priority grouping"""
+    """Get facilities within specified radius with disaster-priority grouping - FIXED VERSION"""
     try:
         lat = float(request.GET.get('lat'))
         lng = float(request.GET.get('lng'))
         radius = int(request.GET.get('radius', 3000))
+        
+        # CACHE CHECK - Avoid duplicate Overpass API calls
+        cache_key = f"facilities_{round(lat, 4)}_{round(lng, 4)}"
+        from django.core.cache import cache
+        
+        cached_result = cache.get(cache_key + "_full")
+        if cached_result:
+            print(f"✅ Returning cached facility data (avoiding Overpass API call)")
+            return Response(cached_result)
         
         # Get facilities from Overpass
         facilities = OverpassClient.query_facilities(lat, lng, radius)
@@ -236,9 +287,24 @@ def get_nearby_facilities(request):
                 }
             })
         
-        # Calculate distances using HybridDistanceCalculator
-        from .utils import HybridDistanceCalculator
-        facilities = HybridDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
+        # Calculate straight-line distances (fast and reliable)
+        from .utils import calculate_haversine_distance
+        for facility in facilities:
+            distance_meters = calculate_haversine_distance(
+                lat, lng,
+                facility['lat'], facility['lng']
+            )
+            
+            facility['distance_meters'] = distance_meters
+            facility['distance_km'] = round(distance_meters / 1000, 2)
+            facility['distance_display'] = format_distance(distance_meters)
+            facility['is_walkable'] = distance_meters <= 500
+            
+            # Estimate travel time (assuming 40 km/h average speed)
+            duration_minutes = (distance_meters / 1000) / 40 * 60
+            facility['duration_minutes'] = round(duration_minutes, 1)
+            facility['duration_display'] = format_duration(duration_minutes * 60)
+            facility['method'] = 'straight_line'
         
         # CRITICAL: Ensure all required fields exist
         for f in facilities:
@@ -254,7 +320,7 @@ def get_nearby_facilities(request):
         # Sort by distance
         facilities.sort(key=lambda x: x.get('distance_meters', 999999))
         
-        # Reorganize by disaster priority
+        # Reorganize by disaster priority - IMPROVED CATEGORIZATION
         evacuation_centers = []
         medical = []
         emergency_services = []
@@ -262,37 +328,27 @@ def get_nearby_facilities(request):
         other_facilities = []
         
         for f in facilities:
-            # PRIORITY 1: Use pre-assigned subcategory from Overpass
+            # Get subcategory (pre-assigned by Overpass)
             subcat = f.get('subcategory', '')
+            ftype = f.get('facility_type', '')
             
-            if subcat == 'evacuation':
+            # Categorize facilities
+            if subcat == 'evacuation' or ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                f['subcategory'] = 'evacuation'
                 evacuation_centers.append(f)
-            elif subcat == 'medical':
+            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                f['subcategory'] = 'medical'
                 medical.append(f)
-            elif subcat == 'emergency_services':
+            elif subcat == 'emergency_services' or ftype in ['fire_station', 'police']:
+                f['subcategory'] = 'emergency_services'
                 emergency_services.append(f)
-            elif subcat == 'essential':
+            elif subcat == 'essential' or ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
+                          'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                f['subcategory'] = 'essential'
                 essential_services.append(f)
             else:
-                # FALLBACK: Categorize by facility_type if subcategory is missing
-                ftype = f.get('facility_type', '')
-                
-                if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
-                    f['subcategory'] = 'evacuation'
-                    evacuation_centers.append(f)
-                elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
-                    f['subcategory'] = 'medical'
-                    medical.append(f)
-                elif ftype in ['fire_station', 'police']:
-                    f['subcategory'] = 'emergency_services'
-                    emergency_services.append(f)
-                elif ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
-                              'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
-                    f['subcategory'] = 'essential'
-                    essential_services.append(f)
-                else:
-                    f['subcategory'] = 'other'
-                    other_facilities.append(f)
+                f['subcategory'] = 'other'
+                other_facilities.append(f)
 
         # DEBUG LOGGING
         print(f"📊 Categorization Results:")
@@ -302,10 +358,9 @@ def get_nearby_facilities(request):
         print(f"   - Essential Services: {len(essential_services)}")
         print(f"   - Other: {len(other_facilities)}")
         
-        
-        # Find nearest of each critical type
+        # FIXED: Find nearest of each critical type (NO DUPLICATES)
         nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
-        nearest_hospital = next((f for f in medical if f.get('facility_type') in ['hospital', 'clinic']), None)
+        nearest_hospital = medical[0] if medical else None  # FIXED: Take first medical facility
         nearest_fire = next((f for f in emergency_services if f.get('facility_type') == 'fire_station'), None)
         
         # CRITICAL FIX: Build summary with proper null handling
@@ -342,6 +397,28 @@ def get_nearby_facilities(request):
                 'total': len(facilities)
             }
         }
+
+        # ... all the categorization code ...
+    
+        result = {
+            'summary': { ... },
+            'evacuation_centers': evacuation_centers[:10],
+            'medical': medical[:10],
+            'emergency_services': emergency_services[:10],
+            'essential_services': essential_services[:10],
+            'other': other_facilities[:10],
+            'counts': { ... }
+        }
+        
+        # ✅ CACHE THE RESULT for 5 minutes
+        cache.set(cache_key + "_full", result, 300)
+        
+        # Also cache simplified version for suitability
+        simplified_result = {
+            'summary': result['summary'],
+            'counts': result['counts']
+        }
+        cache.set(cache_key, simplified_result, 300)
         
         return Response(result)
         
@@ -353,11 +430,10 @@ def get_nearby_facilities(request):
         traceback.print_exc()
         return Response({'error': str(e)}, status=500)
 
-
 def get_nearby_facilities_for_suitability(lat, lng):
     """Helper function for suitability calculation"""
     from .overpass_client import OverpassClient
-    from .utils import HybridDistanceCalculator
+    from .utils import calculate_haversine_distance  # ✅ FIXED
     
     try:
         facilities = OverpassClient.query_facilities(lat, lng, 3000)
@@ -379,20 +455,27 @@ def get_nearby_facilities_for_suitability(lat, lng):
                 }
             }
         
-        facilities = HybridDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
-        
+        # ✅ Calculate straight-line distances (FAST & RELIABLE)
         for facility in facilities:
-            if 'distance_display' not in facility:
-                facility['distance_display'] = format_distance(facility.get('distance_meters', 0))
-            if 'is_walkable' not in facility:
-                facility['is_walkable'] = facility.get('distance_meters', 9999) <= 500
-            if 'duration_display' not in facility:
-                duration_min = facility.get('duration_minutes', 0)
-                facility['duration_display'] = f"{int(duration_min)} min" if duration_min >= 1 else "< 1 min"
+            distance_meters = calculate_haversine_distance(
+                lat, lng,
+                facility['lat'], facility['lng']
+            )
+            
+            facility['distance_meters'] = distance_meters
+            facility['distance_km'] = round(distance_meters / 1000, 2)
+            facility['distance_display'] = format_distance(distance_meters)
+            facility['is_walkable'] = distance_meters <= 500
+            
+            # Estimate travel time
+            duration_minutes = (distance_meters / 1000) / 40 * 60
+            facility['duration_minutes'] = round(duration_minutes, 1)
+            facility['duration_display'] = format_duration(duration_minutes * 60)
+            facility['method'] = 'straight_line'
         
         facilities.sort(key=lambda x: x.get('distance_meters', 999999))
         
-        # SAME IMPROVED CATEGORIZATION as above
+        # IMPROVED CATEGORIZATION (same as main function)
         evacuation_centers = []
         medical = []
         emergency_services = []
@@ -401,37 +484,27 @@ def get_nearby_facilities_for_suitability(lat, lng):
         
         for f in facilities:
             subcat = f.get('subcategory', '')
+            ftype = f.get('facility_type', '')
             
-            if subcat == 'evacuation':
+            if subcat == 'evacuation' or ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                f['subcategory'] = 'evacuation'
                 evacuation_centers.append(f)
-            elif subcat == 'medical':
+            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                f['subcategory'] = 'medical'
                 medical.append(f)
-            elif subcat == 'emergency_services':
+            elif subcat == 'emergency_services' or ftype in ['fire_station', 'police']:
+                f['subcategory'] = 'emergency_services'
                 emergency_services.append(f)
-            elif subcat == 'essential':
+            elif subcat == 'essential' or ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
+                          'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                f['subcategory'] = 'essential'
                 essential_services.append(f)
             else:
-                ftype = f.get('facility_type', '')
-                
-                if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
-                    f['subcategory'] = 'evacuation'
-                    evacuation_centers.append(f)
-                elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
-                    f['subcategory'] = 'medical'
-                    medical.append(f)
-                elif ftype in ['fire_station', 'police']:
-                    f['subcategory'] = 'emergency_services'
-                    emergency_services.append(f)
-                elif ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel',
-                              'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
-                    f['subcategory'] = 'essential'
-                    essential_services.append(f)
-                else:
-                    f['subcategory'] = 'other'
-                    other_facilities.append(f)
+                f['subcategory'] = 'other'
+                other_facilities.append(f)
         
         nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
-        nearest_hospital = next((f for f in medical if f.get('facility_type') in ['hospital', 'clinic']), None)
+        nearest_hospital = medical[0] if medical else None
         nearest_fire = next((f for f in emergency_services if f.get('facility_type') == 'fire_station'), None)
         
         def build_facility_summary(facility):
@@ -1175,6 +1248,18 @@ def format_distance(meters):
         km = meters / 1000
         return f"{km:.1f} km"
 
+def format_duration(seconds):
+    """Format duration for display"""
+    minutes = seconds / 60
+    if minutes < 1:
+        return "< 1 min"
+    elif minutes < 60:
+        return f"{int(minutes)} min"
+    else:
+        hours = int(minutes / 60)
+        mins = int(minutes % 60)
+        return f"{hours}h {mins}min"
+
 @api_view(['GET'])
 def get_location_info(request):
     """Get administrative boundary info for a location"""
@@ -1193,23 +1278,23 @@ def get_location_info(request):
 
 @api_view(['GET'])
 def get_barangay_data(request):
-    """Get barangay boundary data as GeoJSON"""
-    from .models import BarangayBoundary
-    
+    """Get barangay boundary data as GeoJSON - NEW VERSION"""
     try:
         barangay_features = []
-        barangay_records = BarangayBoundary.objects.all()
+        
+        # Use the NEW barangay model
+        barangay_records = BarangayBoundaryNew.objects.all()
         
         for record in barangay_records:
             feature = {
                 'type': 'Feature',
                 'properties': {
-                    'brgy_id': record.brgy_id,
-                    'barangay_name': record.b_name,
-                    'municipality': record.lgu_name,
-                    'population_2020': record.pop_2020,
-                    'area_hectares': record.hectares,
-                    'district': record.district,
+                    'barangay_name': record.adm4_en,
+                    'barangay_code': record.adm4_pcode,
+                    'municipality': record.adm3_en,
+                    'province': record.adm2_en,
+                    'region': record.adm1_en,
+                    'area_sqkm': record.area_sqkm,
                     'dataset_id': record.dataset.id
                 },
                 'geometry': json.loads(record.geometry.geojson)
@@ -1226,15 +1311,14 @@ def get_barangay_data(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
+
+# REPLACE the old get_barangay_from_point function
 @api_view(['GET'])
 def get_barangay_from_point(request):
     """
-    Get barangay information for a specific point location
-    This replaces Nominatim for accurate barangay identification
+    Get barangay information for a specific point location - NEW VERSION
+    Uses accurate PSA-NAMRIA boundaries
     """
-    from .models import BarangayBoundary
-    from django.contrib.gis.geos import Point
-    
     try:
         lat = float(request.GET.get('lat'))
         lng = float(request.GET.get('lng'))
@@ -1242,27 +1326,21 @@ def get_barangay_from_point(request):
         point = Point(lng, lat, srid=4326)
         
         # Find which barangay boundary contains this point
-        barangay = BarangayBoundary.objects.filter(
+        barangay = BarangayBoundaryNew.objects.filter(
             geometry__contains=point
         ).first()
         
         if barangay:
-            # Calculate population density
-            population_density = None
-            if barangay.pop_2020 and barangay.hectares and barangay.hectares > 0:
-                population_density = round(barangay.pop_2020 / barangay.hectares, 2)
-            
             return Response({
                 'success': True,
-                'barangay': barangay.b_name,
-                'municipality': barangay.lgu_name,
-                'province': 'Negros Oriental',
-                'population_2020': barangay.pop_2020,
-                'area_hectares': barangay.hectares,
-                'district': barangay.district,
-                'brgy_code': barangay.brgycode,
-                'population_density': population_density,  # NEW: Population per hectare
-                'full_address': f"{barangay.b_name}, {barangay.lgu_name}, Negros Oriental"
+                'barangay': barangay.adm4_en,
+                'municipality': barangay.adm3_en,
+                'province': barangay.adm2_en,
+                'region': barangay.adm1_en,
+                'area_sqkm': barangay.area_sqkm,
+                'barangay_code': barangay.adm4_pcode,
+                'municipality_code': barangay.adm3_pcode,
+                'full_address': f"{barangay.adm4_en}, {barangay.adm3_en}, {barangay.adm2_en}"
             })
         else:
             # Point is outside all barangay boundaries
@@ -1277,5 +1355,305 @@ def get_barangay_from_point(request):
         
     except ValueError:
         return Response({'error': 'Invalid coordinates'}, status=400)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+    
+
+@api_view(['GET'])
+def get_municipality_info(request):
+    """
+    Get municipality characteristics by municipality code
+    Used when clicking on a barangay to show municipality summary
+    """
+    try:
+        municipality_code = request.GET.get('code')
+        
+        if not municipality_code:
+            return Response({'error': 'Municipality code not provided'}, status=400)
+        
+        from .models import MunicipalityCharacteristic
+        
+        # Find municipality by correspondence code
+        municipality = MunicipalityCharacteristic.objects.filter(
+            correspondence_code=municipality_code
+        ).first()
+        
+        if not municipality:
+            return Response({
+                'found': False,
+                'message': 'No data available for this municipality'
+            })
+        
+        return Response({
+            'found': True,
+            'municipality': {
+                'name': municipality.lgu_name,
+                'code': municipality.correspondence_code,
+                'category': municipality.category,
+                'population': municipality.population,
+                'population_display': municipality.get_population_display(),
+                'revenue': float(municipality.revenue),
+                'revenue_display': municipality.get_revenue_display(),
+                'provincial_score': municipality.provincial_score,
+                'poverty_incidence_rate': municipality.poverty_incidence_rate,
+                
+                # Additional data for potential use
+                'score': municipality.score,
+                'population_weight': municipality.population_weight,
+                'revenue_weight': municipality.revenue_weight,
+                'total_percentage': municipality.total_percentage,
+            }
+        })
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+    
+
+
+@api_view(['GET'])
+def get_barangay_characteristics(request):
+    """
+    Get barangay characteristics by barangay code with nearby facilities
+    Used when clicking on a barangay to show detailed info
+    """
+    try:
+        barangay_code = request.GET.get('code')
+        lat = request.GET.get('lat')
+        lng = request.GET.get('lng')
+        
+        if not barangay_code:
+            return Response({'error': 'Barangay code not provided'}, status=400)
+        
+        from .models import BarangayCharacteristic
+        
+        # Find barangay by code
+        barangay = BarangayCharacteristic.objects.filter(
+            barangay_code=barangay_code
+        ).first()
+        
+        if not barangay:
+            return Response({
+                'found': False,
+                'message': 'No characteristics data available for this barangay'
+            })
+        
+        # Get nearby facilities if coordinates provided
+        nearby_facilities_by_category = {}
+        if lat and lng:
+            try:
+                lat = float(lat)
+                lng = float(lng)
+                nearby_facilities_by_category = get_categorized_facilities(lat, lng, radius=3000)
+            except Exception as e:
+                print(f"Error getting facilities: {e}")
+        
+        return Response({
+            'found': True,
+            'barangay': {
+                'name': barangay.barangay_name,
+                'code': barangay.barangay_code,
+                'population': barangay.population,
+                'population_display': barangay.get_population_display(),
+                'ecological_landscape': barangay.ecological_landscape,
+                'landscape_icon': barangay.get_landscape_icon(),
+                'urbanization': barangay.urbanization,
+                'urbanization_icon': barangay.get_urbanization_icon(),
+                'cellular_signal': barangay.cellular_signal,
+                'public_street_sweeper': barangay.public_street_sweeper,
+                'facilities': nearby_facilities_by_category,  
+            }
+        })
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+def get_categorized_facilities(lat, lng, radius=3000):
+    """
+    Get facilities categorized by type for barangay characteristics
+    
+    Categories:
+    - Education (Elementary/High School/College)
+    - Hospital
+    - Health Center/Clinic
+    - Fire Station
+    - Seaport
+    - Post Office
+    """
+    from .overpass_client import OverpassClient    
+    # Query facilities
+    facilities = OverpassClient.query_facilities(lat, lng, radius)
+    
+    if not facilities:
+        return {}
+    
+    # Calculate straight-line distances (fast and reliable)
+    from .utils import calculate_haversine_distance
+    for facility in facilities:
+        distance_meters = calculate_haversine_distance(
+            lat, lng,
+            facility['lat'], facility['lng']
+        )
+        
+        facility['distance_meters'] = distance_meters
+        facility['distance_km'] = round(distance_meters / 1000, 2)
+        facility['distance_display'] = format_distance(distance_meters)
+        facility['is_walkable'] = distance_meters <= 500
+        
+        # Estimate travel time (assuming 40 km/h average speed)
+        duration_minutes = (distance_meters / 1000) / 40 * 60
+        facility['duration_minutes'] = round(duration_minutes, 1)
+        facility['duration_display'] = format_duration(duration_minutes * 60)
+        facility['method'] = 'straight_line'
+
+    # Categorize facilities
+    categorized = {
+        'education_elementary': [],
+        'education_highschool': [],
+        'education_college': [],
+        'hospital': [],
+        'health_center': [],
+        'fire_station': [],
+        'seaport': [],
+        'post_office': [],
+    }
+    
+    for facility in facilities:
+        ftype = facility.get('facility_type', '')
+        name = facility.get('name', 'Unnamed')
+        distance = facility.get('distance_meters', 999999)
+        distance_display = facility.get('distance_display', 'N/A')
+        
+        # Only include facilities within 3km
+        if distance > 3000:
+            continue
+        
+        facility_info = {
+            'name': name,
+            'distance': distance_display,
+            'distance_meters': distance,
+        }
+        
+        # Education - Elementary
+        if ftype in ['school', 'kindergarten']:
+            # Check if it's specifically elementary or assume elementary for generic "school"
+            if 'elementary' in name.lower() or 'elem' in name.lower() or ftype == 'kindergarten':
+                categorized['education_elementary'].append(facility_info)
+            elif 'high' in name.lower() or 'secondary' in name.lower():
+                categorized['education_highschool'].append(facility_info)
+            elif 'college' in name.lower() or 'university' in name.lower():
+                categorized['education_college'].append(facility_info)
+            else:
+                # Default to elementary for generic schools
+                categorized['education_elementary'].append(facility_info)
+        
+        # Education - High School
+        elif ftype == 'school' and ('high' in name.lower() or 'secondary' in name.lower()):
+            categorized['education_highschool'].append(facility_info)
+        
+        # Education - College/University
+        elif ftype in ['college', 'university']:
+            categorized['education_college'].append(facility_info)
+        
+        # Hospital
+        elif ftype == 'hospital':
+            categorized['hospital'].append(facility_info)
+        
+        # Health Center/Clinic
+        elif ftype in ['clinic', 'doctors']:
+            categorized['health_center'].append(facility_info)
+        
+        # Fire Station
+        elif ftype == 'fire_station':
+            categorized['fire_station'].append(facility_info)
+        
+        # Seaport (we need to query this separately via Overpass)
+        elif ftype in ['ferry_terminal', 'port']:
+            categorized['seaport'].append(facility_info)
+        
+        # Post Office
+        elif ftype == 'post_office':
+            categorized['post_office'].append(facility_info)
+    
+    # Sort each category by distance
+    for category in categorized:
+        categorized[category].sort(key=lambda x: x['distance_meters'])
+    
+    # Count facilities in each category
+    counts = {
+        'education_elementary': len(categorized['education_elementary']),
+        'education_highschool': len(categorized['education_highschool']),
+        'education_college': len(categorized['education_college']),
+        'hospital': len(categorized['hospital']),
+        'health_center': len(categorized['health_center']),
+        'fire_station': len(categorized['fire_station']),
+        'seaport': len(categorized['seaport']),
+        'post_office': len(categorized['post_office']),
+    }
+    
+    return {
+        'facilities': categorized,
+        'counts': counts
+    }
+
+
+@api_view(['GET'])
+def get_zonal_values(request):
+    """
+    Get zonal values for a specific barangay by code
+    Used to show land prices when clicking on a barangay
+    """
+    try:
+        barangay_code = request.GET.get('code')
+        
+        if not barangay_code:
+            return Response({'error': 'Barangay code not provided'}, status=400)
+        
+        from .models import ZonalValue
+        
+        # Find all zonal values for this barangay
+        zonal_values = ZonalValue.objects.filter(
+            barangay_code=barangay_code
+        ).order_by('street', 'vicinity')
+        
+        if not zonal_values.exists():
+            return Response({
+                'found': False,
+                'message': 'No zonal value data available for this barangay'
+            })
+        
+        # Calculate statistics
+        prices = [float(zv.price_per_sqm) for zv in zonal_values]
+        avg_price = sum(prices) / len(prices)
+        min_price = min(prices)
+        max_price = max(prices)
+        
+        # Build zonal value list
+        values_list = []
+        for zv in zonal_values:
+            values_list.append({
+                'street': zv.street or 'General',
+                'vicinity': zv.vicinity or '',
+                'land_class': zv.land_class or 'N/A',
+                'price_per_sqm': float(zv.price_per_sqm),
+                'price_display': zv.get_price_display(),
+                'price_formatted': zv.get_price_per_sqm_formatted(),
+            })
+        
+        return Response({
+            'found': True,
+            'barangay_name': zonal_values.first().barangay_name,
+            'municipality': zonal_values.first().municipality,
+            'zonal_values': values_list,
+            'statistics': {
+                'count': len(values_list),
+                'average_price': round(avg_price, 2),
+                'average_price_display': f"₱{avg_price:,.2f}",
+                'min_price': round(min_price, 2),
+                'min_price_display': f"₱{min_price:,.2f}",
+                'max_price': round(max_price, 2),
+                'max_price_display': f"₱{max_price:,.2f}",
+            }
+        })
+        
     except Exception as e:
         return Response({'error': str(e)}, status=500)

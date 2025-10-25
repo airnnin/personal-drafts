@@ -1,14 +1,14 @@
 import os
 from pathlib import Path
 
-# GDAL Configuration for Windows
 if os.name == 'nt':  # Windows
-    GDAL_LIBRARY_PATH = r'C:\Users\User\AppData\Local\Programs\OSGeo4W\bin\gdal311.dll'
-    GEOS_LIBRARY_PATH = r'C:\Users\User\AppData\Local\Programs\OSGeo4W\bin\geos_c.dll'
-    
-    # Use OSGeo4W's PROJ library, not PostgreSQL's
-    os.environ['PROJ_LIB'] = r'C:\Users\User\AppData\Local\Programs\OSGeo4W\share\proj'
-    os.environ['GDAL_DATA'] = r'C:\Users\User\AppData\Local\Programs\OSGeo4W\share\gdal'
+    OSGEO4W = r"C:\Users\User\AppData\Local\Programs\OSGeo4W"
+
+    GDAL_LIBRARY_PATH = os.path.join(OSGEO4W, 'bin', 'gdal311.dll')
+    GEOS_LIBRARY_PATH = os.path.join(OSGEO4W, 'bin', 'geos_c.dll')
+
+    os.environ['GDAL_DATA'] = os.path.join(OSGEO4W, 'share', 'gdal')
+    os.environ['PROJ_LIB'] = os.path.join(OSGEO4W, 'share', 'proj')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -70,7 +70,7 @@ WSGI_APPLICATION = 'hazard_system.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': 'disaster_risk_db2',
+        'NAME': 'arise',
         'USER': 'postgres',  # Change to your PostgreSQL username
         'PASSWORD': 'admin123',  # Change to your PostgreSQL password
         'HOST': 'localhost',

@@ -33,6 +33,8 @@ class OverpassClient:
         'restaurant': {'category': 'everyday', 'name': 'Restaurant', 'priority': 4, 'subcat': 'essential'},
         'fast_food': {'category': 'everyday', 'name': 'Fast Food', 'priority': 4, 'subcat': 'essential'},
         'cafe': {'category': 'everyday', 'name': 'Cafe', 'priority': 4, 'subcat': 'essential'},
+        'post_office': {'category': 'government', 'name': 'Post Office', 'priority': 3, 'subcat': 'essential'},  # NEW
+        'ferry_terminal': {'category': 'everyday', 'name': 'Ferry Terminal', 'priority': 3, 'subcat': 'essential'},  # NEW
         
         # GOVERNMENT (Priority 2-3)
         'townhall': {'category': 'government', 'name': 'Town/Municipal Hall', 'priority': 2, 'subcat': 'government'},
@@ -63,21 +65,41 @@ class OverpassClient:
         (
         nwr["amenity"~"^(hospital|clinic|doctors|pharmacy|fire_station|police)$"](around:{radius},{lat},{lng});
         nwr["amenity"~"^(school|kindergarten|college|university|community_centre)$"](around:{radius},{lat},{lng});
-        nwr["amenity"~"^(marketplace|bank|atm|fuel|townhall|public_building)$"](around:{radius},{lat},{lng});
-        nwr["amenity"~"^(restaurant|fast_food|cafe)$"](around:{radius},{lat},{lng});
+        nwr["amenity"~"^(marketplace|bank|atm|fuel|townhall|public_building|post_office)$"](around:{radius},{lat},{lng});
+        nwr["amenity"~"^(restaurant|fast_food|cafe|ferry_terminal)$"](around:{radius},{lat},{lng});
         nwr["shop"~"^(supermarket|convenience|mall|department_store)$"](around:{radius},{lat},{lng});
         nwr["office"="government"](around:{radius},{lat},{lng});
+        nwr["amenity"="ferry_terminal"](around:{radius},{lat},{lng});
+        nwr["man_made"="pier"](around:{radius},{lat},{lng});
+        nwr["harbour"="yes"](around:{radius},{lat},{lng});
         );
         out center;
         """
         
         try:
-            response = requests.post(
-                cls.BASE_URL,
-                data={'data': query},
-                timeout=25
-            )
-            response.raise_for_status()
+            # RETRY LOGIC for rate limits
+            max_retries = 2
+            retry_delay = 2
+            
+            for attempt in range(max_retries):
+                response = requests.post(
+                    cls.BASE_URL,
+                    data={'data': query},
+                    timeout=25
+                )
+                
+                if response.status_code == 429:  # Too Many Requests
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ Rate limited, waiting {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"⚠️ Rate limit exceeded after {max_retries} attempts")
+                        return []
+                
+                response.raise_for_status()
+                break  # Success
             data = response.json()
             
             facilities = []
