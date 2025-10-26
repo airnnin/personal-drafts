@@ -1070,7 +1070,39 @@ function displayFacilities(data) {
     );
     console.log('================================');
 
-    // Nearest Evacuation Center - CLICKABLE (with clarification)
+    // ✅ NEAREST HOSPITAL - CLICKABLE (RESTORED)
+    if (data.summary.nearest_hospital) {
+        const hospital = data.summary.nearest_hospital;
+        const walkIcon = hospital.is_walkable ? '✅' : '⚠️';
+        
+        html += `
+            <div class="facility-summary-card clickable-facility" 
+                data-lat="${data.medical[0].lat}" 
+                data-lng="${data.medical[0].lng}"
+                style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #dc2626; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#fef2f2'; this.style.transform='translateX(4px)';"
+                onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">
+                    🏥 Nearest Medical Facility
+                </div>
+                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">
+                    ${walkIcon} ${hospital.name}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${hospital.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
+                </div>
+            </div>
+        `;
+    } else {
+        html += `
+            <div style="padding: 0.875rem; background: #fee2e2; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #ef4444;">
+                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No medical facility within 3km</div>
+            </div>
+        `;
+    }
+
+    // ✅ NEAREST EVACUATION CENTER - CLICKABLE
     if (data.summary.nearest_evacuation) {
         const evac = data.summary.nearest_evacuation;
         const walkIcon = evac.is_walkable ? '✅' : '⚠️';
@@ -1104,12 +1136,12 @@ function displayFacilities(data) {
             <!-- Evacuation Centers Breakdown -->
             <div style="background: #f0fdf4; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; border: 1px solid #86efac;">
                 <div style="font-size: 0.75rem; color: #166534; font-weight: 600; margin-bottom: 0.5rem;">
-                    📊 Evacuation Centers within 3km: ${totalEvacCenters}
+                    📊 Total Evacuation Sites within 3km: ${totalEvacCenters}
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.75rem;">
                     <div style="padding: 0.5rem; background: white; border-radius: 4px; text-align: center;">
                         <div style="font-weight: 700; color: #10b981; font-size: 1rem;">${governmentEvacCenters.length}</div>
-                        <div style="color: #6b7280;">Evacuation Sites</div>
+                        <div style="color: #6b7280;">Gov't Buildings</div>
                     </div>
                     <div style="padding: 0.5rem; background: white; border-radius: 4px; text-align: center;">
                         <div style="font-weight: 700; color: #7c3aed; font-size: 1rem;">${schoolEvacCenters.length}</div>
@@ -1121,12 +1153,12 @@ function displayFacilities(data) {
     } else {
         html += `
             <div style="padding: 0.875rem; background: #fee2e2; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #ef4444;">
-                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No medical facility within 3km</div>
+                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No evacuation center within 3km</div>
             </div>
         `;
     }
-    
-    // Nearest Emergency Service (Fire/Police) - CLICKABLE
+
+    // ✅ NEAREST EMERGENCY SERVICE (Fire/Police) - CLICKABLE
     if (data.summary.nearest_fire_station) {
         const fire = data.summary.nearest_fire_station;
         const walkIcon = fire.is_walkable ? '✅' : '⚠️';
@@ -1135,11 +1167,11 @@ function displayFacilities(data) {
         
         html += `
             <div class="facility-summary-card clickable-facility" 
-                 data-lat="${emergencyService.lat}" 
-                 data-lng="${emergencyService.lng}"
-                 style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316; cursor: pointer; transition: all 0.2s;"
-                 onmouseover="this.style.backgroundColor='#fff7ed'; this.style.transform='translateX(4px)';"
-                 onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                data-lat="${emergencyService.lat}" 
+                data-lng="${emergencyService.lng}"
+                style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#fff7ed'; this.style.transform='translateX(4px)';"
+                onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
                 <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🚒 Nearest Emergency Service</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${fire.name}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -1149,7 +1181,7 @@ function displayFacilities(data) {
             </div>
         `;
     }
-    
+
     html += `
             <div style="font-size: 0.75rem; color: #6b7280; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #bfdbfe; text-align: center;">
                 ✅ Within 500m walking distance | ⚠️ Requires vehicle

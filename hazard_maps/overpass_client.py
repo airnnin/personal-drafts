@@ -208,7 +208,7 @@ class OverpassClient:
                 category = facility_info['category']
                 type_display = facility_info['name']
                 priority = facility_info['priority']
-                subcategory = facility_info.get('subcat')
+                subcategory = facility_info.get('subcat', 'other')  # ✅ FIX: Always get subcat
         
         # Check shop tag
         elif 'shop' in tags:
@@ -218,7 +218,7 @@ class OverpassClient:
                 category = facility_info['category']
                 type_display = facility_info['name']
                 priority = facility_info['priority']
-                subcategory = facility_info.get('subcat')
+                subcategory = facility_info.get('subcat', 'other')  # ✅ FIX: Always get subcat
         
         # Check office tag
         elif 'office' in tags:
@@ -228,12 +228,12 @@ class OverpassClient:
                 category = facility_info['category']
                 type_display = facility_info['name']
                 priority = facility_info['priority']
-                subcategory = facility_info.get('subcat')
+                subcategory = facility_info.get('subcat', 'other')  # ✅ FIX: Always get subcat
         
         if not category or not type_display:
             return None
         
-        # Ensure subcategory is set
+        # ✅ CRITICAL FIX: Ensure subcategory is NEVER None
         if not subcategory:
             subcategory = 'other'
         
@@ -246,7 +246,7 @@ class OverpassClient:
             'facility_type': facility_type,
             'type_display': type_display,
             'category': category,
-            'subcategory': subcategory,
+            'subcategory': subcategory,  # ✅ NOW ALWAYS SET
             'priority': priority,
             'lat': lat,
             'lng': lng,
