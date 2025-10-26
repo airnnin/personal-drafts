@@ -163,6 +163,7 @@ function onMapClick(e) {
     currentMarker = L.marker([lat, lng]).addTo(map);
     showLocationInfo(lat, lng);
 }
+
 async function showLocationInfo(lat, lng) {
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -207,7 +208,7 @@ async function showLocationInfo(lat, lng) {
                     if (charData.found && charData.barangay) {
                         const brgy = charData.barangay;
                         
-                        // Add barangay characteristics
+                        // Add barangay characteristics - NO FACILITIES HERE
                         locationHTML += `
                             <!-- Barangay Characteristics Section -->
                             <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
@@ -246,20 +247,15 @@ async function showLocationInfo(lat, lng) {
                                 </div>
                             </div>
                         `;
-                        
-                        // NEW: Add Facilities Section
-                        if (brgy.facilities && brgy.facilities.facilities) {
-                            locationHTML += buildFacilitiesSection(brgy.facilities);
-                        }
                     }
                 } catch (charError) {
                     console.log('No barangay characteristics data available');
                 }
             }
             
-            // Complete the location info HTML
+            // Complete the location info HTML - NO FACILITIES
             locationHTML += `
-                        <!-- Area and Region (Original) -->
+                        <!-- Area and Region -->
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem;">
                                 <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
@@ -324,6 +320,7 @@ async function showLocationInfo(lat, lng) {
 
     getHazardInfoForLocation(lat, lng, hazardDetails);
     
+    // Load facilities in the bottom section
     const facilitiesContainer = document.getElementById('facilities-section');
     if (facilitiesContainer) {
         loadNearbyFacilities(lat, lng);
@@ -1046,7 +1043,7 @@ function displayFacilities(data) {
     }
     
     let html = `
-        <!-- EMERGENCY PREPAREDNESS SUMMARY - FIXED VERSION -->
+        <!-- EMERGENCY PREPAREDNESS SUMMARY - ENHANCED WITH CLICKABLE ITEMS -->
         <div class="emergency-summary" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%); border: 2px solid #3b82f6; border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.15);">
             <h5 style="margin: 0 0 1rem 0; color: #1e40af; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
                 <span style="font-size: 1.5rem;">🚨</span>
@@ -1054,20 +1051,24 @@ function displayFacilities(data) {
             </h5>
     `;
     
-    // FIXED: Nearest Evacuation Center
+    // Nearest Evacuation Center - CLICKABLE
     if (data.summary.nearest_evacuation) {
         const evac = data.summary.nearest_evacuation;
         const walkIcon = evac.is_walkable ? '✅' : '⚠️';
-        const walkStatus = evac.is_walkable ? 'Walking distance' : 'Requires transport';
-        const travelTime = evac.duration ? `🚗 ${evac.duration} drive` : '';
+        const walkStatus = evac.is_walkable ? 'Within 500m walking distance' : 'Requires vehicle';
         
         html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Evacuation Center</div>
+            <div class="facility-summary-card clickable-facility" 
+                 data-lat="${data.evacuation_centers[0].lat}" 
+                 data-lng="${data.evacuation_centers[0].lng}"
+                 style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981; cursor: pointer; transition: all 0.2s;"
+                 onmouseover="this.style.backgroundColor='#f0fdf4'; this.style.transform='translateX(4px)';"
+                 onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🏠 Nearest Evacuation Center</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${evac.name}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${evac.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${evac.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
                 </div>
             </div>
         `;
@@ -1080,20 +1081,23 @@ function displayFacilities(data) {
         `;
     }
     
-    // FIXED: Nearest Hospital/Medical Facility (NO DUPLICATES)
+    // Nearest Hospital/Medical Facility - CLICKABLE
     if (data.summary.nearest_hospital) {
         const hosp = data.summary.nearest_hospital;
         const walkIcon = hosp.is_walkable ? '✅' : '⚠️';
-        const walkStatus = hosp.is_walkable ? 'Walking distance' : 'Requires transport';
-        const travelTime = hosp.duration ? `🚗 ${hosp.duration} drive` : '';
         
         html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #ef4444;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Medical Facility</div>
+            <div class="facility-summary-card clickable-facility" 
+                 data-lat="${data.medical[0].lat}" 
+                 data-lng="${data.medical[0].lng}"
+                 style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #ef4444; cursor: pointer; transition: all 0.2s;"
+                 onmouseover="this.style.backgroundColor='#fef2f2'; this.style.transform='translateX(4px)';"
+                 onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🏥 Nearest Medical Facility</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${hosp.name}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${hosp.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${hosp.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
                 </div>
             </div>
         `;
@@ -1105,20 +1109,25 @@ function displayFacilities(data) {
         `;
     }
     
-    // FIXED: Nearest Fire Station
+    // Nearest Emergency Service (Fire/Police) - CLICKABLE
     if (data.summary.nearest_fire_station) {
         const fire = data.summary.nearest_fire_station;
         const walkIcon = fire.is_walkable ? '✅' : '⚠️';
-        const walkStatus = fire.is_walkable ? 'Walking distance' : 'Requires transport';
-        const travelTime = fire.duration ? `🚗 ${fire.duration} drive` : '';
+        
+        const emergencyService = data.emergency_services.find(f => f.facility_type === 'fire_station') || data.emergency_services[0];
         
         html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Fire Station</div>
+            <div class="facility-summary-card clickable-facility" 
+                 data-lat="${emergencyService.lat}" 
+                 data-lng="${emergencyService.lng}"
+                 style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316; cursor: pointer; transition: all 0.2s;"
+                 onmouseover="this.style.backgroundColor='#fff7ed'; this.style.transform='translateX(4px)';"
+                 onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🚒 Nearest Emergency Service</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${fire.name}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${fire.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${fire.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
                 </div>
             </div>
         `;
@@ -1131,71 +1140,221 @@ function displayFacilities(data) {
         </div>
     `;
     
-    // Detailed Facility Lists (Collapsible with better styling)
-    if (data.evacuation_centers.length > 0) {
-        html += `
-            <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: #fee2e2; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #fecaca;">
-                    <span>🏠 Evacuation Centers (${data.counts.evacuation})</span>
-                    <span style="font-size: 0.875rem;">▼</span>
-                </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
-        `;
-        data.evacuation_centers.forEach((f, index) => {
-            html += createFacilityCard(f, '#dc2626', '#fef2f2', `evac-${index}`);
-            addFacilityMarker(f, '#dc2626');
-        });
-        html += `</div></details>`;
-    }
+    // ========================================
+    // DETAILED FACILITY CATEGORIES - REORGANIZED
+    // ========================================
     
+    // 1. MEDICAL FACILITIES (Separate from Emergency Services)
     if (data.medical.length > 0) {
         html += `
-            <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: #fee2e2; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #fecaca;">
+            <details class="facility-details" style="margin-bottom: 0.75rem;" open>
+                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #dc2626;">
                     <span>🏥 Medical Facilities (${data.counts.medical})</span>
                     <span style="font-size: 0.875rem;">▼</span>
                 </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fef2f2; border-radius: 6px;">
         `;
-        data.medical.forEach((f, index) => {
-            html += createFacilityCard(f, '#dc2626', '#fef2f2', `medical-${index}`);
-            addFacilityMarker(f, '#dc2626');
-        });
+        
+        // Hospitals
+        const hospitals = data.medical.filter(f => f.facility_type === 'hospital').sort((a, b) => a.distance_meters - b.distance_meters);
+        if (hospitals.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏥 Hospitals (${hospitals.length})</div>`;
+            hospitals.forEach((f, index) => {
+                html += createFacilityCard(f, '#dc2626', '#ffffff', `hospital-${index}`);
+                addFacilityMarker(f, '#dc2626');
+            });
+            html += `</div>`;
+        }
+        
+        // Clinics & Health Centers
+        const clinics = data.medical.filter(f => f.facility_type !== 'hospital').sort((a, b) => a.distance_meters - b.distance_meters);
+        if (clinics.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💊 Clinics & Health Centers (${clinics.length})</div>`;
+            clinics.forEach((f, index) => {
+                html += createFacilityCard(f, '#dc2626', '#ffffff', `clinic-${index}`);
+                addFacilityMarker(f, '#dc2626');
+            });
+            html += `</div>`;
+        }
+        
         html += `</div></details>`;
     }
     
+    // 2. EMERGENCY SERVICES (Fire Stations, Police Stations)
     if (data.emergency_services.length > 0) {
         html += `
             <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: #fee2e2; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #fecaca;">
-                    <span>🚒 Emergency Services (${data.counts.emergency_services})</span>
+                <summary style="cursor: pointer; font-weight: 700; color: #f97316; padding: 0.875rem; background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #f97316;">
+                    <span>🚨 Emergency Services (${data.counts.emergency_services})</span>
                     <span style="font-size: 0.875rem;">▼</span>
                 </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fff7ed; border-radius: 6px;">
         `;
-        data.emergency_services.forEach((f, index) => {
-            html += createFacilityCard(f, '#dc2626', '#fef2f2', `emergency-${index}`);
-            addFacilityMarker(f, '#dc2626');
-        });
+        
+        const fireStations = data.emergency_services.filter(f => f.facility_type === 'fire_station').sort((a, b) => a.distance_meters - b.distance_meters);
+        const policeStations = data.emergency_services.filter(f => f.facility_type === 'police').sort((a, b) => a.distance_meters - b.distance_meters);
+        
+        if (fireStations.length > 0) {
+            html += `<div style="margin-bottom: ${policeStations.length > 0 ? '0.75rem' : '0'};"><div style="font-size: 0.75rem; font-weight: 700; color: #c2410c; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🚒 Fire Stations (${fireStations.length})</div>`;
+            fireStations.forEach((f, index) => {
+                html += createFacilityCard(f, '#f97316', '#ffffff', `fire-${index}`);
+                addFacilityMarker(f, '#f97316');
+            });
+            html += `</div>`;
+        }
+        
+        if (policeStations.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #c2410c; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">👮 Police Stations (${policeStations.length})</div>`;
+            policeStations.forEach((f, index) => {
+                html += createFacilityCard(f, '#3b82f6', '#ffffff', `police-${index}`);
+                addFacilityMarker(f, '#3b82f6');
+            });
+            html += `</div>`;
+        }
+        
         html += `</div></details>`;
     }
     
+    // 3. EVACUATION & SHELTER SITES (Government Buildings ONLY)
+    const governmentBuildings = data.evacuation_centers.filter(f => ['community_centre', 'townhall', 'public_building'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+    
+    if (governmentBuildings.length > 0) {
+        html += `
+            <details class="facility-details" style="margin-bottom: 0.75rem;">
+                <summary style="cursor: pointer; font-weight: 700; color: #059669; padding: 0.875rem; background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #059669;">
+                    <span>🏛️ Evacuation & Shelter Sites (${governmentBuildings.length})</span>
+                    <span style="font-size: 0.875rem;">▼</span>
+                </summary>
+                <div style="margin-top: 0.5rem; padding: 0.75rem; background: #f0fdf4; border-radius: 6px;">
+                    <div style="background: #fef3c7; border-left: 3px solid #f59e0b; padding: 0.625rem; border-radius: 4px; margin-bottom: 0.75rem;">
+                        <p style="margin: 0; font-size: 0.75rem; color: #92400e; line-height: 1.5;">
+                            ℹ️ <strong>Note:</strong> Government buildings such as barangay halls, community centers, and multipurpose halls designated for disaster shelter. Confirm with your local DRRMO for official listings.
+                        </p>
+                    </div>
+        `;
+        
+        governmentBuildings.forEach((f, index) => {
+            html += createFacilityCard(f, '#059669', '#ffffff', `evac-${index}`);
+            addFacilityMarker(f, '#059669');
+        });
+        
+        html += `</div></details>`;
+    }
+    
+    // 4. EDUCATIONAL INSTITUTIONS (Schools by Level)
+    const schools = data.evacuation_centers.filter(f => ['school', 'kindergarten', 'college', 'university'].includes(f.facility_type));
+    
+    if (schools.length > 0) {
+        const elementary = schools.filter(f => ['school', 'kindergarten'].includes(f.facility_type) && !f.name.toLowerCase().includes('high') && !f.name.toLowerCase().includes('secondary')).sort((a, b) => a.distance_meters - b.distance_meters);
+        const highSchools = schools.filter(f => f.name.toLowerCase().includes('high') || f.name.toLowerCase().includes('secondary')).sort((a, b) => a.distance_meters - b.distance_meters);
+        const universities = schools.filter(f => ['college', 'university'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        
+        html += `
+            <details class="facility-details" style="margin-bottom: 0.75rem;">
+                <summary style="cursor: pointer; font-weight: 700; color: #7c3aed; padding: 0.875rem; background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #7c3aed;">
+                    <span>🎓 Educational Institutions (${schools.length})</span>
+                    <span style="font-size: 0.875rem;">▼</span>
+                </summary>
+                <div style="margin-top: 0.5rem; padding: 0.75rem; background: #faf5ff; border-radius: 6px;">
+                    <div style="background: #dbeafe; border-left: 3px solid #3b82f6; padding: 0.625rem; border-radius: 4px; margin-bottom: 0.75rem;">
+                        <p style="margin: 0; font-size: 0.75rem; color: #1e40af; line-height: 1.5;">
+                            ℹ️ <strong>Note:</strong> Schools and government buildings commonly serve as evacuation sites during disasters. Confirm with your local DRRMO for official evacuation center designations.
+                        </p>
+                    </div>
+        `;
+        
+        // Elementary Schools
+        if (elementary.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">📚 Elementary Schools (${elementary.length})</div>`;
+            elementary.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `elem-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        // High Schools
+        if (highSchools.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏫 High Schools (${highSchools.length})</div>`;
+            highSchools.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `high-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        // Colleges & Universities
+        if (universities.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🎓 Colleges & Universities (${universities.length})</div>`;
+            universities.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `uni-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        html += `</div></details>`;
+    }
+    
+    // 5. ESSENTIAL SERVICES (Markets, Banks, Fuel, Food)
     if (data.essential_services.length > 0) {
         html += `
             <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #2563eb; padding: 0.875rem; background: #dbeafe; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #93c5fd;">
-                    <span>🛒 Essential Services (${data.counts.essential})</span>
+                <summary style="cursor: pointer; font-weight: 700; color: #2563eb; padding: 0.875rem; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #2563eb;">
+                    <span>🏪 Essential Services (${data.counts.essential})</span>
                     <span style="font-size: 0.875rem;">▼</span>
                 </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #eff6ff; border-radius: 6px;">
         `;
-        data.essential_services.forEach((f, index) => {
-            html += createFacilityCard(f, '#2563eb', '#eff6ff', `essential-${index}`);
-            addFacilityMarker(f, '#2563eb');
-        });
+        
+        // Markets & Supermarkets
+        const markets = data.essential_services.filter(f => ['marketplace', 'supermarket', 'convenience', 'mall', 'department_store'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        if (markets.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🛒 Markets & Stores (${markets.length})</div>`;
+            markets.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `market-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
+        // Banks & ATMs
+        const banks = data.essential_services.filter(f => ['bank', 'atm'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        if (banks.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💰 Banks & ATMs (${banks.length})</div>`;
+            banks.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `bank-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
+        // Fuel Stations
+        const fuel = data.essential_services.filter(f => f.facility_type === 'fuel').sort((a, b) => a.distance_meters - b.distance_meters);
+        if (fuel.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">⛽ Fuel Stations (${fuel.length})</div>`;
+            fuel.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `fuel-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
+        // Restaurants & Cafes
+        const food = data.essential_services.filter(f => ['restaurant', 'fast_food', 'cafe'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        if (food.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🍽️ Restaurants & Cafes (${food.length})</div>`;
+            food.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `food-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
         html += `</div></details>`;
     }
     
+    // Data source footer
     html += `
         <div style="margin-top: 1.5rem; padding: 0.875rem; background: #f9fafb; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb;">
             <p style="margin: 0; font-size: 0.75rem; color: #6b7280;">
@@ -1207,6 +1366,35 @@ function displayFacilities(data) {
     
     container.innerHTML = html;
     attachFacilityClickListeners();
+    attachEmergencyPreparednessClickListeners(); // NEW: Attach click handlers for emergency summary
+}
+
+function attachEmergencyPreparednessClickListeners() {
+    const clickableCards = document.querySelectorAll('.clickable-facility');
+    
+    clickableCards.forEach(card => {
+        card.addEventListener('click', function() {
+            const lat = parseFloat(this.dataset.lat);
+            const lng = parseFloat(this.dataset.lng);
+            
+            // Zoom to facility location
+            map.setView([lat, lng], 17, {
+                animate: true,
+                duration: 0.5
+            });
+            
+            // Open the marker popup
+            facilityMarkers.eachLayer(layer => {
+                if (layer instanceof L.Marker) {
+                    const markerLatLng = layer.getLatLng();
+                    if (Math.abs(markerLatLng.lat - lat) < 0.00001 && 
+                        Math.abs(markerLatLng.lng - lng) < 0.00001) {
+                        layer.openPopup();
+                    }
+                }
+            });
+        });
+    });
 }
 
 function createFacilityCard(facility, borderColor, bgColor, facilityId) {
@@ -1417,84 +1605,6 @@ function setupMunicipalityPanel() {
 }
 
 
-function buildFacilitiesSection(facilitiesData) {
-    const facilities = facilitiesData.facilities;
-    const counts = facilitiesData.counts;
-    
-    let html = `
-        <!-- Nearby Facilities Section -->
-        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 2px solid #3b82f6;">
-            <h5 style="font-size: 0.95rem; font-weight: 700; color: #1f2937; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
-                <span>🏢</span>
-                <span>Nearby Facilities (within 3km)</span>
-            </h5>
-    `;
-    
-    // Education - Elementary
-    html += buildFacilityCategory('🎓 Elementary Schools', facilities.education_elementary, counts.education_elementary);
-    
-    // Education - High School
-    html += buildFacilityCategory('🏫 High Schools', facilities.education_highschool, counts.education_highschool);
-    
-    // Education - College/University
-    html += buildFacilityCategory('🎓 Colleges/Universities', facilities.education_college, counts.education_college);
-    
-    // Hospital
-    html += buildFacilityCategory('🏥 Hospitals', facilities.hospital, counts.hospital);
-    
-    // Health Center/Clinic
-    html += buildFacilityCategory('💊 Health Centers/Clinics', facilities.health_center, counts.health_center);
-    
-    // Fire Station
-    html += buildFacilityCategory('🚒 Fire Stations', facilities.fire_station, counts.fire_station);
-    
-    // Seaport
-    html += buildFacilityCategory('⚓ Seaports', facilities.seaport, counts.seaport);
-    
-    // Post Office
-    html += buildFacilityCategory('📮 Post Offices', facilities.post_office, counts.post_office);
-    
-    html += `</div>`;
-    
-    return html;
-}
-
-// NEW FUNCTION: Build Individual Category
-function buildFacilityCategory(title, facilityList, count) {
-    if (count === 0) {
-        return `
-            <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: #fef2f2; border-radius: 6px; border-left: 3px solid #ef4444;">
-                <div style="font-weight: 700; font-size: 0.8rem; color: #991b1b; margin-bottom: 0.25rem;">${title}</div>
-                <div style="font-size: 0.75rem; color: #7f1d1d;">❌ None within 3km</div>
-            </div>
-        `;
-    }
-    
-    let html = `
-        <details style="margin-bottom: 0.75rem; background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
-            <summary style="padding: 0.75rem; cursor: pointer; font-weight: 700; font-size: 0.8rem; color: #1f2937; display: flex; justify-content: space-between; align-items: center;">
-                <span>${title}</span>
-                <span style="background: #3b82f6; color: white; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.7rem;">${count}</span>
-            </summary>
-            <div style="padding: 0 0.75rem 0.75rem 0.75rem;">
-    `;
-    
-    facilityList.forEach((facility, index) => {
-        html += `
-            <div style="padding: 0.5rem; background: white; border-radius: 4px; margin-bottom: 0.375rem; display: flex; justify-content: space-between; align-items: center; ${index === facilityList.length - 1 ? 'margin-bottom: 0;' : ''}">
-                <div style="font-size: 0.75rem; color: #1f2937; font-weight: 600; flex: 1;">${facility.name}</div>
-                <div style="font-size: 0.7rem; color: #059669; font-weight: 700; white-space: nowrap; margin-left: 0.5rem;">📍 ${facility.distance}</div>
-            </div>
-        `;
-    });
-    
-    html += `
-            </div>
-        </details>
-    `;
-    
-    return html;
-}
 // Initialize everything when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
     initMap();

@@ -306,17 +306,6 @@ def get_nearby_facilities(request):
             facility['duration_display'] = format_duration(duration_minutes * 60)
             facility['method'] = 'straight_line'
         
-        # CRITICAL: Ensure all required fields exist
-        for f in facilities:
-            # Add missing fields with defaults if not present
-            if 'distance_display' not in f:
-                f['distance_display'] = format_distance(f.get('distance_meters', 0))
-            if 'duration_display' not in f:
-                duration_min = f.get('duration_minutes', 0)
-                f['duration_display'] = f"{int(duration_min)} min" if duration_min >= 1 else "< 1 min"
-            if 'is_walkable' not in f:
-                f['is_walkable'] = f.get('distance_meters', 9999) <= 500
-        
         # Sort by distance
         facilities.sort(key=lambda x: x.get('distance_meters', 999999))
         
@@ -397,18 +386,6 @@ def get_nearby_facilities(request):
                 'total': len(facilities)
             }
         }
-
-        # ... all the categorization code ...
-    
-        result = {
-            'summary': { ... },
-            'evacuation_centers': evacuation_centers[:10],
-            'medical': medical[:10],
-            'emergency_services': emergency_services[:10],
-            'essential_services': essential_services[:10],
-            'other': other_facilities[:10],
-            'counts': { ... }
-        }
         
         # ✅ CACHE THE RESULT for 5 minutes
         cache.set(cache_key + "_full", result, 300)
@@ -433,7 +410,7 @@ def get_nearby_facilities(request):
 def get_nearby_facilities_for_suitability(lat, lng):
     """Helper function for suitability calculation"""
     from .overpass_client import OverpassClient
-    from .utils import calculate_haversine_distance  # ✅ FIXED
+    from .utils import calculate_haversine_distance
     
     try:
         facilities = OverpassClient.query_facilities(lat, lng, 3000)
