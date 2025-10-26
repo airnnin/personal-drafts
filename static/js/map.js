@@ -1042,6 +1042,15 @@ function displayFacilities(data) {
         return;
     }
     
+    // Calculate proper evacuation center counts
+    const governmentEvacCenters = data.evacuation_centers.filter(f => 
+        ['community_centre', 'townhall', 'public_building'].includes(f.facility_type)
+    );
+    const schoolEvacCenters = data.evacuation_centers.filter(f => 
+        ['school', 'kindergarten', 'college', 'university'].includes(f.facility_type)
+    );
+    const totalEvacCenters = governmentEvacCenters.length + schoolEvacCenters.length;
+
     let html = `
         <!-- EMERGENCY PREPAREDNESS SUMMARY - ENHANCED WITH CLICKABLE ITEMS -->
         <div class="emergency-summary" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%); border: 2px solid #3b82f6; border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.15);">
@@ -1050,54 +1059,62 @@ function displayFacilities(data) {
                 <span>Emergency Preparedness</span>
             </h5>
     `;
-    
-    // Nearest Evacuation Center - CLICKABLE
+
+    // 🔍 DEBUG: Log evacuation center counts
+    console.log('=== EVACUATION CENTER DEBUG ===');
+    console.log('Total evacuation_centers array:', data.evacuation_centers.length);
+    console.log('Government buildings:', governmentEvacCenters.length);
+    console.log('Schools:', schoolEvacCenters.length);
+    console.log('Facility types in evacuation_centers:', 
+        data.evacuation_centers.map(f => f.facility_type).join(', ')
+    );
+    console.log('================================');
+
+    // Nearest Evacuation Center - CLICKABLE (with clarification)
     if (data.summary.nearest_evacuation) {
         const evac = data.summary.nearest_evacuation;
         const walkIcon = evac.is_walkable ? '✅' : '⚠️';
-        const walkStatus = evac.is_walkable ? 'Within 500m walking distance' : 'Requires vehicle';
+        
+        // Determine facility type for clarification
+        const isSchool = ['school', 'kindergarten', 'college', 'university'].includes(data.evacuation_centers[0].facility_type);
+        const facilityTypeLabel = isSchool ? 'School (Evacuation Site)' : 'Evacuation Center';
         
         html += `
             <div class="facility-summary-card clickable-facility" 
-                 data-lat="${data.evacuation_centers[0].lat}" 
-                 data-lng="${data.evacuation_centers[0].lng}"
-                 style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981; cursor: pointer; transition: all 0.2s;"
-                 onmouseover="this.style.backgroundColor='#f0fdf4'; this.style.transform='translateX(4px)';"
-                 onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🏠 Nearest Evacuation Center</div>
-                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${evac.name}</div>
+                data-lat="${data.evacuation_centers[0].lat}" 
+                data-lng="${data.evacuation_centers[0].lng}"
+                style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#f0fdf4'; this.style.transform='translateX(4px)';"
+                onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">
+                    🏠 Nearest Evacuation Center
+                </div>
+                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">
+                    ${walkIcon} ${evac.name}
+                </div>
+                <div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 0.375rem;">
+                    ${facilityTypeLabel}
+                </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                     <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${evac.distance} away</span>
                     <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
                 </div>
             </div>
-        `;
-    } else {
-        html += `
-            <div style="padding: 0.875rem; background: #fee2e2; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #ef4444;">
-                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No evacuation center within 3km</div>
-                <div style="color: #7f1d1d; font-size: 0.75rem; margin-top: 0.25rem;">Consider identifying alternative safe areas</div>
-            </div>
-        `;
-    }
-    
-    // Nearest Hospital/Medical Facility - CLICKABLE
-    if (data.summary.nearest_hospital) {
-        const hosp = data.summary.nearest_hospital;
-        const walkIcon = hosp.is_walkable ? '✅' : '⚠️';
-        
-        html += `
-            <div class="facility-summary-card clickable-facility" 
-                 data-lat="${data.medical[0].lat}" 
-                 data-lng="${data.medical[0].lng}"
-                 style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #ef4444; cursor: pointer; transition: all 0.2s;"
-                 onmouseover="this.style.backgroundColor='#fef2f2'; this.style.transform='translateX(4px)';"
-                 onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🏥 Nearest Medical Facility</div>
-                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${hosp.name}</div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${hosp.distance} away</span>
-                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
+            
+            <!-- Evacuation Centers Breakdown -->
+            <div style="background: #f0fdf4; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; border: 1px solid #86efac;">
+                <div style="font-size: 0.75rem; color: #166534; font-weight: 600; margin-bottom: 0.5rem;">
+                    📊 Evacuation Centers within 3km: ${totalEvacCenters}
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.75rem;">
+                    <div style="padding: 0.5rem; background: white; border-radius: 4px; text-align: center;">
+                        <div style="font-weight: 700; color: #10b981; font-size: 1rem;">${governmentEvacCenters.length}</div>
+                        <div style="color: #6b7280;">Evacuation Sites</div>
+                    </div>
+                    <div style="padding: 0.5rem; background: white; border-radius: 4px; text-align: center;">
+                        <div style="font-weight: 700; color: #7c3aed; font-size: 1rem;">${schoolEvacCenters.length}</div>
+                        <div style="color: #6b7280;">Schools</div>
+                    </div>
                 </div>
             </div>
         `;
@@ -1144,41 +1161,41 @@ function displayFacilities(data) {
     // DETAILED FACILITY CATEGORIES - REORGANIZED
     // ========================================
     
-    // 1. MEDICAL FACILITIES (Separate from Emergency Services)
-    if (data.medical.length > 0) {
-        html += `
-            <details class="facility-details" style="margin-bottom: 0.75rem;" open>
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #dc2626;">
-                    <span>🏥 Medical Facilities (${data.counts.medical})</span>
-                    <span style="font-size: 0.875rem;">▼</span>
-                </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fef2f2; border-radius: 6px;">
-        `;
-        
-        // Hospitals
-        const hospitals = data.medical.filter(f => f.facility_type === 'hospital').sort((a, b) => a.distance_meters - b.distance_meters);
-        if (hospitals.length > 0) {
-            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏥 Hospitals (${hospitals.length})</div>`;
-            hospitals.forEach((f, index) => {
-                html += createFacilityCard(f, '#dc2626', '#ffffff', `hospital-${index}`);
-                addFacilityMarker(f, '#dc2626');
-            });
-            html += `</div>`;
-        }
-        
-        // Clinics & Health Centers
-        const clinics = data.medical.filter(f => f.facility_type !== 'hospital').sort((a, b) => a.distance_meters - b.distance_meters);
-        if (clinics.length > 0) {
-            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💊 Clinics & Health Centers (${clinics.length})</div>`;
-            clinics.forEach((f, index) => {
-                html += createFacilityCard(f, '#dc2626', '#ffffff', `clinic-${index}`);
-                addFacilityMarker(f, '#dc2626');
-            });
-            html += `</div>`;
-        }
-        
-        html += `</div></details>`;
+    // 1. MEDICAL FACILITIES (Hospitals & Clinics ONLY - Pharmacies moved to Essential Services)
+if (data.medical.length > 0) {
+    html += `
+        <details class="facility-details" style="margin-bottom: 0.75rem;" open>
+            <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #dc2626;">
+                <span>🏥 Medical Facilities (${data.counts.medical})</span>
+                <span style="font-size: 0.875rem;">▼</span>
+            </summary>
+            <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fef2f2; border-radius: 6px;">
+    `;
+    
+    // Hospitals
+    const hospitals = data.medical.filter(f => f.facility_type === 'hospital').sort((a, b) => a.distance_meters - b.distance_meters);
+    if (hospitals.length > 0) {
+        html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏥 Hospitals (${hospitals.length})</div>`;
+        hospitals.forEach((f, index) => {
+            html += createFacilityCard(f, '#dc2626', '#ffffff', `hospital-${index}`);
+            addFacilityMarker(f, '#dc2626');
+        });
+        html += `</div>`;
     }
+    
+    // Clinics & Health Centers (EXCLUDING pharmacies)
+    const clinics = data.medical.filter(f => f.facility_type !== 'hospital' && f.facility_type !== 'pharmacy').sort((a, b) => a.distance_meters - b.distance_meters);
+    if (clinics.length > 0) {
+        html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💊 Clinics & Health Centers (${clinics.length})</div>`;
+        clinics.forEach((f, index) => {
+            html += createFacilityCard(f, '#dc2626', '#ffffff', `clinic-${index}`);
+            addFacilityMarker(f, '#dc2626');
+        });
+        html += `</div>`;
+    }
+    
+    html += `</div></details>`;
+}
     
     // 2. EMERGENCY SERVICES (Fire Stations, Police Stations)
     if (data.emergency_services.length > 0) {
@@ -1306,6 +1323,17 @@ function displayFacilities(data) {
                 </summary>
                 <div style="margin-top: 0.5rem; padding: 0.5rem; background: #eff6ff; border-radius: 6px;">
         `;
+        
+        // Pharmacies (NEW - added at top of essential services)
+            const pharmacies = data.essential_services.filter(f => f.facility_type === 'pharmacy').sort((a, b) => a.distance_meters - b.distance_meters);
+            if (pharmacies.length > 0) {
+                html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💊 Pharmacies (${pharmacies.length})</div>`;
+                pharmacies.forEach((f, index) => {
+                    html += createFacilityCard(f, '#2563eb', '#ffffff', `pharmacy-${index}`);
+                    addFacilityMarker(f, '#2563eb');
+                });
+                html += `</div>`;
+            }
         
         // Markets & Supermarkets
         const markets = data.essential_services.filter(f => ['marketplace', 'supermarket', 'convenience', 'mall', 'department_store'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);

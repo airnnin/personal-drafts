@@ -14,7 +14,7 @@ class OverpassClient:
         'hospital': {'category': 'emergency', 'name': 'Hospital', 'priority': 1, 'subcat': 'medical'},
         'clinic': {'category': 'emergency', 'name': 'Clinic', 'priority': 1, 'subcat': 'medical'},
         'doctors': {'category': 'emergency', 'name': 'Medical Clinic', 'priority': 1, 'subcat': 'medical'},
-        'pharmacy': {'category': 'emergency', 'name': 'Pharmacy', 'priority': 2, 'subcat': 'medical'},
+        'pharmacy': {'category': 'emergency', 'name': 'Pharmacy', 'priority': 3, 'subcat': 'essential'},
         'fire_station': {'category': 'emergency', 'name': 'Fire Station', 'priority': 1, 'subcat': 'emergency_services'},
         'police': {'category': 'emergency', 'name': 'Police Station', 'priority': 1, 'subcat': 'emergency_services'},
         

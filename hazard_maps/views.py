@@ -325,16 +325,16 @@ def get_nearby_facilities(request):
             if subcat == 'evacuation' or ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
                 f['subcategory'] = 'evacuation'
                 evacuation_centers.append(f)
-            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors']:  # ← REMOVED 'pharmacy' from here
                 f['subcategory'] = 'medical'
                 medical.append(f)
             elif subcat == 'emergency_services' or ftype in ['fire_station', 'police']:
                 f['subcategory'] = 'emergency_services'
                 emergency_services.append(f)
             elif subcat == 'essential' or ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
-                          'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
-                f['subcategory'] = 'essential'
-                essential_services.append(f)
+                                    'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store', 'pharmacy']:  # ← ADDED 'pharmacy' here
+                    f['subcategory'] = 'essential'
+                    essential_services.append(f)
             else:
                 f['subcategory'] = 'other'
                 other_facilities.append(f)
@@ -466,19 +466,29 @@ def get_nearby_facilities_for_suitability(lat, lng):
             if subcat == 'evacuation' or ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
                 f['subcategory'] = 'evacuation'
                 evacuation_centers.append(f)
-            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors']:
                 f['subcategory'] = 'medical'
                 medical.append(f)
             elif subcat == 'emergency_services' or ftype in ['fire_station', 'police']:
                 f['subcategory'] = 'emergency_services'
                 emergency_services.append(f)
             elif subcat == 'essential' or ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
-                          'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                        'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store', 'pharmacy']:
                 f['subcategory'] = 'essential'
                 essential_services.append(f)
             else:
                 f['subcategory'] = 'other'
                 other_facilities.append(f)
+
+        # 🔍 DEBUG LOGGING
+        print(f"📊 Categorization Results:")
+        print(f"   - Evacuation: {len(evacuation_centers)}")
+        print(f"     • Government: {len([f for f in evacuation_centers if f['facility_type'] in ['community_centre', 'townhall', 'public_building']])}")
+        print(f"     • Schools: {len([f for f in evacuation_centers if f['facility_type'] in ['school', 'kindergarten', 'college', 'university']])}")
+        print(f"   - Medical: {len(medical)}")
+        print(f"   - Emergency Services: {len(emergency_services)}")
+        print(f"   - Essential Services: {len(essential_services)}")
+        print(f"   - Other: {len(other_facilities)}")
         
         nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
         nearest_hospital = medical[0] if medical else None
